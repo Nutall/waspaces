@@ -1,0 +1,15 @@
+#+Author: jun.yi
+
+* Daily Work Recording
+
+** Org-mode Learning
+   <2017-03-16 Thu 09:00-11:30> 
+   <2017-03-16 Thu 13:00-14:00>
+   <2017-03-16 Thu 15:00-17:30>
+
+** Camera module produce share listening
+   <2017-03-16 Thu 14:00-15:00>
+
+** Doro project boot.img error
+
+** 东拓F620 AE sync compatible
