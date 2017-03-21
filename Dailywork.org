@@ -7,7 +7,11 @@
    <2017-03-16 Thu 13:00-14:00>
    <2017-03-16 Thu 15:00-17:30>
 
-** Camera module produce share listening
+** DONE Write lens and vcm question answers.
+   CLOSED: [2017-03-20 Mon 09:40] SCHEDULED: <2017-03-17 Fri>
+
+** DONE Camera module produce share listening
+   CLOSED: [2017-03-16 Thu 15:00]
    <2017-03-16 Thu 14:00-15:00>
 
 ** DONE Doro project boot.img cause error, need to verify.
@@ -17,13 +21,20 @@
 ** TODO 东拓F620 AE sync compatible
    SCHEDULED: <2017-03-17 Fri 15:00>
 
-** 东拓F620 OTP dump compatible
-
-** TODO Write lens and vcm question answers.
-   SCHEDULED: <2017-03-17 Fri>
+** TODO 东拓F620 大凌模组OTP data dump and write
+   SCHEDULED: <2017-03-20 Mon 16:30>
 
 * Emacs Skills Note
 ** Switch between emacs command history and emacs command
    Shortkey: Ctrl + o
 ** View the history log of file
    M + x magit-log-buffer-file
+
+* Gtags Manual
+  1. gtags-update
+  2. gtags -v
+  3. gtags -uv
+
+* Git Manual
+  1. git apply --check file.patch
+  2. git apply file.patch
