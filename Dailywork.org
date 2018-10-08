@@ -21,9 +21,6 @@
 ** DONE 东拓F620 大凌模组OTP data dump and write
    CLOSED: [2017-03-23 Thu 18:00] SCHEDULED: <2017-03-20 Mon 16:30>
 
-** TODO Vsun mobile basic function verify.
-   DEADLINE: <2017-03-21 Tue 11:30>
-
 * Emacs Skills Note
 ** Switch between emacs command history and emacs command
    Shortkey: Ctrl + o
