@@ -1,0 +1,109 @@
+#+TITLE: Notebook1
+#+AUTHOR: jun.yi
+#+DATE: 2018-10-09
+
+* Dualcam Project
+** Doro
+   1. *Make complie failed, the error output is "GC overhead limit exceeded"*
+
+      R: Insufficient memory
+
+      S:
+      #+BEGIN_SRC sh
+        $cd project_root
+        $export JACK_SERVER_VM_ARGUMENTS="-Dfile.encoding=UTF-8 -XX:+TieredCompilation -Xmx4g"
+        $./prebuilts/sdk/tools/jack-admin kill-server
+        $./prebuilts/sdk/tools/jack-admin start-server
+      #+END_SRC
+
+   2. *Camera test run CTS*
+      #+BEGIN_SRC sh
+        $run cts -m CtsMediaTestCases --test android.media.cts.MediaRecorderTest#testRecorderPauseResume
+      #+END_SRC
+
+   3. *Close shading module by adb*
+      #+BEGIN_SRC sh
+        $ adb shell setprop debug.lsc_mgr.enable 0
+      #+END_SRC
+
+** Vsun_V5507B
+   1. *Change framerate*
+
+      vendor/mediatek/proprietary/hardware/mtkcam/legacy/platform/mt6735/v1/common/paramsmgr/params/ParamsManagerImp.cpp
+      #+BEGIN_SRC C++
+        mParameters.set(MtkCameraParameters::KEY_PIP_MAX_FRAME_RATE_ZSD_ON, "22");
+      #+END_SRC
+
+   2. *Key for framerate log*
+
+      #+BEGIN_SRC sh
+        $adb logcat -s iio/ifunc | grep -i "dequeueHwBuf"
+        $adb logacat | grep -i "handleReturnBuffers"
+      #+END_SRC
+
+   3. *Engineer mode Number*
+
+      =*#527364#*=
+
+   4. *OV2685 hw sync issue*
+
+      1)手动模式帧率计算公式: FPS=SCLK/HTS/VTS
+
+      HTS=R[380C,380D];
+
+      VTS=R[380E,380F];
+
+      R[3a0e,3a0f]= int(VTS/R[3a06,3a07])* R[3a06,3a07]
+
+      R[3a10,3a11]= int(VTS/R[3a08,3a09])* R[3a08,3a09]
+
+      Pclk 66000000hz
+
+      OV2685_MIPI_FULL_PERIOD_PIXEL_NUMS:R[0x380c,0x380d]  0x6a4=1700
+
+      OV2685_MIPI_FULL_PERIOD_LINE_NUMS :R[0x380e,0x380f]  0x50e=1294
+
+      2)建议调试寄存器如下：
+
+      Shading：   0x5800-0x581b
+
+      AWB:        0x5180-0x519b
+
+      CCM:        0x5380-0x538c
+
+      Gamma:      0x5400-0x5411
+
+      Sharpness:  0x5308-0x5313
+
+      Raw de-noise:0x5280-0x5287
+
+      Y de-noise:  0x5300-0x5307
+
+      RGB De-noise:0x5480-0x5489
+
+      0x3824/0x3825设置成1/4*HTS~1/2*HTS（0x380c,0x380d） （425~850）；0x3826/0x3827设置成VTS -4~VTS-128
+** Whale
+   1. *Display dualcam icon in Snapcamera*
+
+      #+BEGIN_SRC sh
+        $adb shell setprop persist.vendor.snapcam.bokeh 1
+      #+END_SRC
+
+   2. *Dump otp data*
+
+      #+BEGIN_SRC sh
+        $ adb shell setprop persist.vendor.camera.cal.dump 1
+        $ adb shell setprop persist.vendor.camera.sensor.debug 5
+      #+END_SRC
+
+   3. *Close selinux*
+
+      #+BEGIN_SRC sh
+        $adb shell setenforce 0
+      #+END_SRC
+
+   4. *UDCF LITE AE SYNC ISSUE*
+
+      * 驱动需要配置OTP AEC数据的接口，以便AE sync算法使用。
+      * k值的获取要不是从效果文件中获取，要不就是取自OTP。
+      * 目前算法只针对不同色温下的K值有做调整，没有针对不同的亮度环境做调整。
