@@ -26,7 +26,7 @@
         $ adb shell setprop debug.lsc_mgr.enable 0
       #+END_SRC
 
-** Vsun_V5507B
+** Vsun\under{}V5507B
    1. *Change framerate*
 
       vendor/mediatek/proprietary/hardware/mtkcam/legacy/platform/mt6735/v1/common/paramsmgr/params/ParamsManagerImp.cpp
@@ -107,3 +107,59 @@
       * 驱动需要配置OTP AEC数据的接口，以便AE sync算法使用。
       * k值的获取要不是从效果文件中获取，要不就是取自OTP。
       * 目前算法只针对不同色温下的K值有做调整，没有针对不同的亮度环境做调整。
+
+   5. *repo sync*
+      #+BEGIN_SRC sh
+        $repo sync -c -q -f --force-sync -j4
+      #+END_SRC
+
+   6. *Qcom AF sync debug*
+
+      * persist. +vendor.+ camera.dual.SlaveLensTH   ::LensThreshold 设相应的值
+      * persist. +vendor.+ camera.dual.frames2wait   ::framesToWaitProp 设相应的值
+      * persist. +vendor.+ camera.dual.mfollow       ::1使能是否enable这个和main的比较,0 disable这个功能
+
+   7. *Display RGB and MONO at the same time*
+
+      #+BEGIN_SRC sh
+        $adb shell setprop persist.westalgo.dual.camera.display.mode 1
+      #+END_SRC
+
+   8. *OTP dump permission issue*
+
+      #+BEGIN_SRC c
+        static int xxx_xxx_eeprom_dump_dcdata(sensor_eeprom_data_t *e_ctrl)
+        {
+
+          int i = 0;
+          int eeprom_fd = -1;
+          int err = 0;
+          mode_t m;
+          SERR("xxx_xxx_eeprom_dump_dcdata Enter");
+
+          if (access(PATH_DUALCAM, F_OK) != -1)
+            {
+              SERR("eeprom file is ready!");
+            }
+          else
+            {
+              sleep(5);
+              m = umask(0);
+              eeprom_fd = open(PATH_DUALCAM,  O_RDWR|O_CREAT, 0666);
+              if (eeprom_fd < 0) {
+                SERR("open epprom file error ret:%d", eeprom_fd);
+                return 0;
+              }
+
+              err = write(eeprom_fd, e_ctrl->eeprom_params.buffer + CALI_DATA_OFFESET, CALI_DATA_NUM);
+              if (err < 0) {
+                SERR("write epprom data error");
+              }
+              SERR("eeprom write done %d",err);
+              close(eeprom_fd);
+              umask(m);
+            }
+
+          return 0;
+        }
+      #+END_SRC
