@@ -240,3 +240,5 @@
       + Key:"=aec_process_calculate_current_luma: aec_Hybrid: hybrid luma="
 
         [[file:./img/notebook1_2.png]]
+** TODO A3
+   SCHEDULED: <2018-10-15 Mon 09:00>
