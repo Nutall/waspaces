@@ -242,3 +242,28 @@
         [[file:./img/notebook1_2.png]]
 ** TODO A3
    SCHEDULED: <2018-10-15 Mon 09:00>
+
+* Platform
+** Qcom
+   1. *Fastboot usage*
+      #+BEGIN_SRC sh
+        $adb reboot bootloader
+        $fastboot flash boot boot.img
+        $fastboot flash system system.img
+      #+END_SRC
+   2. *Compile mm-camera*
+      #+BEGIN_SRC sh
+        $cd vendor/qcom/proprietary/mm-camera
+        $mm -j6 2>&1 | tee bulid.log
+      #+END_SRC
+      编译完成之后push对应的.so文件到手机里，然后kill掉 mm-qcamera-daemon
+   3. *Log with FPS*
+      #+BEGIN_SRC sh
+        adb root
+        adb shell setprop persist.debug.sf.showfps 1
+      #+END_SRC
+      Key words: "=PROFILE_PREVIEW_FRAMES="
+   4. *How to know sensor name*
+      #+BEGIN_SRC sh
+        $cat /sys/class/video4linux/v*/name
+      #+END_SRC
