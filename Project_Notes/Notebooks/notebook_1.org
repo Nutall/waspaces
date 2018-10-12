@@ -198,3 +198,45 @@
    2. *Optical zoom with ratio*
 
       [[file:./img/notebook1_1.png]]
+** VM4
+   1. *Open specify camera on MTK*
+
+      #+BEGIN_SRC sh
+        $adb shell setprop debug.camera.open 2
+      #+END_SRC
+
+   2. *Dump jpeg*
+
+      #+BEGIN_SRC sh
+        $adb shell setprop debug.camera.dump.JpegNode 1
+      #+END_SRC
+
+   3. *View camera info*
+
+      #+BEGIN_SRC sh
+        $adb shell cat /proc/driver/camera_info
+      #+END_SRC
+
+   4. *MTK adb logcat interrupt*
+
+      #+BEGIN_SRC sh
+        $adb logcat -G 10m
+      #+END_SRC
+** 1819
+   1. *Review hw snyc from kernel log*
+
+      #+BEGIN_SRC sh
+        adb root
+        adb shell
+        echo "8" > /proc/sys/kernel/printk
+        //echo 'file filename +p' > /sys/kernel/debug/dynamic_debug/control
+        echo 'file msm_isp_axi_util.c +p' > /sys/kernel/debug/dynamic_debug/control
+        exit
+        adb shell cat /dev/kmsg | grep -i "msm_isp_increment_frame_id"
+      #+END_SRC
+
+   2. *Aux picture black issue*
+
+      + Key:"=aec_process_calculate_current_luma: aec_Hybrid: hybrid luma="
+
+        [[file:./img/notebook1_2.png]]
