@@ -83,6 +83,9 @@
 
       0x3824/0x3825设置成1/4*HTS~1/2*HTS（0x380c,0x380d） （425~850）；0x3826/0x3827设置成VTS -4~VTS-128
 ** Whale
+   :LOGBOOK:
+   CLOCK: [2018-10-12 Fri 10:20]--[2018-10-12 Fri 10:45] =>  0:25
+   :END:
    1. *Display dualcam icon in Snapcamera*
 
       #+BEGIN_SRC sh
@@ -163,3 +166,35 @@
           return 0;
         }
       #+END_SRC
+
+   9. *Mono brighter than RGB when low light*
+
+      #+BEGIN_SRC c
+        static const int  low_luma_value = 15;
+        static float exp_main_to_aux(float main_exp,exposureEntry *main)
+        {
+          float aux_exp;
+          int main_avg_luma;
+          aux_exp = main_exp * sensor_K;
+          if(main->linecount > 8000 && main->sensor_gain > 31.0 && main->avg_luma <= low_luma_value){
+            main_avg_luma = main->avg_luma == 0 ? 1 : main->avg_luma;
+            aux_exp *= (float)low_luma_value / (float)main_avg_luma;
+          }
+          if(aux_exp > 9750*31.0)
+            aux_exp = 9750*31.0;
+          return aux_exp;
+        }
+      #+END_SRC
+
+** Bong
+   1. *Frame sync*
+
+      验证frame id和timestamps是否同步在mm_channel_superbuf_comp_and_enqueue接口中添加如下
+      #+BEGIN_SRC c
+        uint64_t t_ms = (uint64_t)buf_info->buf->ts.tv_sec * 1000 + (uint64_t)buf_info->buf->ts.tv_nsec / 1000000;
+        LOGI("stream_type:%d sessionid:%d  frame_idx:%d t_ms:%lld ms",buf_info->buf->stream_type,ch_obj->sessionid,buf_info->frame_idx,t_ms);
+      #+END_SRC
+
+   2. *Optical zoom with ratio*
+
+      [[file:./img/notebook1_1.png]]
