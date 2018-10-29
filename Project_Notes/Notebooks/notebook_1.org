@@ -267,4 +267,18 @@
       #+BEGIN_SRC sh
         $cat /sys/class/video4linux/v*/name
       #+END_SRC
+   5. *Check user or userdebug*
+      #+BEGIN_SRC sh
+        $adb shell getprop ro.build.type
+      #+END_SRC
+   6. *Qcom calibration flag in sys*
+      #+BEGIN_SRC sh
+      adb shell "cat /sys/bus/platform/devices/1b0c000.qcom,cci:qcom,eeprom@0/calibration_flag"
+      #+END_SRC
 ** TODO MTK
+* Ubuntu
+** Global Usage
+   1. *Search anything*
+      #+BEGIN_SRC sh
+        $global -xg "anything"
+      #+END_SRC
