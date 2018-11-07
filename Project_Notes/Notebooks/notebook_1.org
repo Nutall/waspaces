@@ -240,8 +240,8 @@
       + Key:"=aec_process_calculate_current_luma: aec_Hybrid: hybrid luma="
 
         [[file:./img/notebook1_2.png]]
-** TODO A3
-   SCHEDULED: <2018-10-15 Mon 09:00>
+** DONE A3
+   CLOSED: [2018-10-31 Wed 18:00] SCHEDULED: <2018-10-15 Mon 09:00>
 
 * Platform
 ** Qcom
@@ -282,3 +282,43 @@
       #+BEGIN_SRC sh
         $global -xg "anything"
       #+END_SRC
+** Emacs
+*** *Dired mode*
+    1. *Enter dired mode*
+
+       Key: SPC f j
+    2. *Fresh current directory*
+
+       Key: g
+
+    3. *Mark command*
+
+       - m: mark current icon directory
+
+       - u: cancel mark current icon directory
+
+       - U: cancel all mark
+
+       - d: mark the file and directory that to be removed
+
+       - t: mark the other file that not marked
+
+    4. *File operation*
+
+       - +: create a directory
+
+       - C: copy file
+
+       - R: rename file or move file
+
+       - D: remove file
+
+       - x: remove file that is marked
+
+       - z: use gzip for the file
+
+    5. *Change filename*
+
+       - C-x C-q then C-c C-c
+
+* Linux
