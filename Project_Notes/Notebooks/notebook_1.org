@@ -198,6 +198,13 @@
    2. *Optical zoom with ratio*
 
       [[file:./img/notebook1_1.png]]
+
+   3. *Disable awb sync*
+
+      #+BEGIN_SRC sh
+        $adb shell setprop persist.camera.awb.sync 2
+        $adb shell setprop persist.vendor.camera.awb.sync 2
+      #+END_SRC
 ** VM4
    1. *Open specify camera on MTK*
 
@@ -242,6 +249,7 @@
         [[file:./img/notebook1_2.png]]
 ** DONE A3
    CLOSED: [2018-10-31 Wed 18:00] SCHEDULED: <2018-10-15 Mon 09:00>
+** SAT
 
 * Platform
 ** Qcom
