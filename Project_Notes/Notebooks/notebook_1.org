@@ -352,3 +352,7 @@
        - C-x C-q then C-c C-c
 
 * Linux
+** Taking logcat and kernel logs simultaneously
+   #+BEGIN_SRC sh
+     $adb logcat -v time -f /dev/kmsg | adb shell cat /proc/kmsg
+   #+END_SRC
