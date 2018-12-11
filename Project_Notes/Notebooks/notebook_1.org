@@ -356,3 +356,7 @@
    #+BEGIN_SRC sh
      $adb logcat -v time -f /dev/kmsg | adb shell cat /proc/kmsg
    #+END_SRC
+** Generat patch
+   #+BEGIN_SRC sh
+     $git diff --name-only | tr "\n" " " | xargs tar cvfz test.tar.gz
+   #+END_SRC
