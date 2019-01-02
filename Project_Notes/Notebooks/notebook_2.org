@@ -40,4 +40,15 @@
 **** CaptureResult
 **** TotalCaptureResult
 *** CameraCharacteristics
+    #+BEGIN_SRC java
+      private void setUpCameraOutputs(int imageFormat) {
+          Log.d(TAG, "setUpCameraOutputs");
+          CameraManager manager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
+          try {
+              String[] cameraIdList = manager.getCameraIdList();
+              for (int i = 0; i < cameraIdList.length; i++) {
+                  String cameraId = cameraIdList[i];
+
+                  CameraCharacteristics characteristics = manager.getCameraCharacteristics(cameraId);
+    #+END_SRC
 *** TextView
