@@ -1,0 +1,43 @@
+#+TITLE: Android Camera2 API
+#+AUTHOR: jun.yi
+#+DATE: 2019-01-02
+
+* Important Class
+** SurfaceView Class
+*** SurfaceView API
+*** SurfaceHolder API
+*** SurfaceHolder.Callback
+** android.hardware.camera2 class
+*** CameraManager
+   #+BEGIN_SRC java
+     private void openCamera(int id) {
+         if (mPaused) {
+             return;
+         }
+         Log.d(TAG, "openCamera " + id);
+         CameraManager manager;
+         try {
+             manager = (CameraManager) mActivity.getSystemService(Context.CAMERA_SERVICE);
+             mCameraId[id] = manager.getCameraIdList()[id];
+             if (!mCameraOpenCloseLock.tryAcquire(5000, TimeUnit.MILLISECONDS)) {
+                 Log.d(TAG, "Time out waiting to lock camera opening.");
+                 throw new RuntimeException("Time out waiting to lock camera opening");
+             }
+             manager.openCamera(mCameraId[id], mStateCallback, mCameraHandler);
+         } catch (CameraAccessException e) {
+             e.printStackTrace();
+         } catch (InterruptedException e) {
+             e.printStackTrace();
+         }
+     }
+
+   #+END_SRC
+*** CameraDevice
+*** CameraCaptureSession
+*** CameraMetadata
+**** CaptureRequest
+**** CaptureRequest.Builder
+**** CaptureResult
+**** TotalCaptureResult
+*** CameraCharacteristics
+*** TextView
