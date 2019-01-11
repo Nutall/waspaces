@@ -33,7 +33,99 @@
 
    #+END_SRC
 *** CameraDevice
+    * CameraDevice.StateCallback
+
+      #+BEGIN_SRC java
+        private final CameraDevice.StateCallback mStateCallback = new CameraDevice.StateCallback() {
+
+                @Override
+                public void onOpened(CameraDevice cameraDevice) {
+                    int id = Integer.parseInt(cameraDevice.getId());
+                    Log.d(TAG, "onOpened " + id);
+                    mCameraOpenCloseLock.release();
+                    if (mPaused) {
+                        return;
+                    }
+
+                    mCameraDevice[id] = cameraDevice;
+                    mCameraOpened[id] = true;
+
+                    if (isBackCamera() && getCameraMode() == DUAL_MODE && id == BAYER_ID) {
+                        Message msg = mCameraHandler.obtainMessage(OPEN_CAMERA, MONO_ID, 0);
+                        mCameraHandler.sendMessage(msg);
+                    } else {
+                        mCamerasOpened = true;
+                        mActivity.runOnUiThread(new Runnable() {
+                            @Override
+                            public void run() {
+                                mUI.onCameraOpened(mCameraIdList);
+                            }
+                        });
+                        createSessions();
+                    }
+                }
+
+                @Override
+                public void onDisconnected(CameraDevice cameraDevice) {
+                    int id = Integer.parseInt(cameraDevice.getId());
+                    Log.d(TAG, "onDisconnected " + id);
+                    cameraDevice.close();
+                    mCameraDevice[id] = null;
+                    mCameraOpenCloseLock.release();
+                    mCamerasOpened = false;
+                }
+
+                @Override
+                public void onError(CameraDevice cameraDevice, int error) {
+                    int id = Integer.parseInt(cameraDevice.getId());
+                    Log.e(TAG, "onError " + id + " " + error);
+                    if (mCamerasOpened) {
+                        mCameraDevice[id].close();
+                        mCameraDevice[id] = null;
+                    }
+                    mCameraOpenCloseLock.release();
+                    mCamerasOpened = false;
+
+                    if (null != mActivity) {
+                        Toast.makeText(mActivity,"open camera error id =" + id,
+                                Toast.LENGTH_LONG).show();
+                        mActivity.finish();
+                    }
+                }
+
+                @Override
+                public void onClosed(CameraDevice cameraDevice) {
+                    int id = Integer.parseInt(cameraDevice.getId());
+                    Log.d(TAG, "onClosed " + id);
+                    mCameraDevice[id] = null;
+                    mCameraOpenCloseLock.release();
+                    mCamerasOpened = false;
+                }
+
+            };
+
+      #+END_SRC
 *** CameraCaptureSession
+    * CameraCaptureSession.CaptureCallback
+    * CameraCaptureSession.StateCallback
+    #+BEGIN_SRC java
+      try {
+          CaptureRequest.Builder builder = getRequestBuilder(id);
+          builder.setTag(id);
+          addPreviewSurface(builder, null, id);
+
+          applySettingsForLockFocus(builder, id);
+          CaptureRequest request = builder.build();
+          mLockRequestHashCode[id] = request.hashCode();
+          mState[id] = STATE_WAITING_AF_LOCK;
+          mCaptureSession[id].capture(request, mCaptureCallback, mCameraHandler);
+          if(mHiston) {
+              updateGraghViewVisibility(View.INVISIBLE);
+          }
+      } catch (CameraAccessException | IllegalStateException e) {
+          e.printStackTrace();
+      }
+    #+END_SRC
 *** CameraMetadata
 **** CaptureRequest
 **** CaptureRequest.Builder
