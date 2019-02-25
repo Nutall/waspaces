@@ -350,6 +350,10 @@
     5. *Change filename*
 
        - C-x C-q then C-c C-c
+*** *Xml Fold*
+    1. *fold or unfold*
+
+       Key: , z
 
 * Linux
 ** Taking logcat and kernel logs simultaneously
