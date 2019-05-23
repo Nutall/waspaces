@@ -1,0 +1,1204 @@
+#+TITLE: Camera2 HAL3
+#+OPTIONS: ^:nil
+
+* Camera2 HAL3 Open过程分析
+** 前言
+   本文主要通过跟读高通SDM439平台P版本代码，梳理Camera HAL3的打开流程，其中包括单摄和双摄模式下，Camera打开流程的差异。
+
+** Open过程分析
+   1. 在应用对硬件发出open请求后，会通过Camera HAL来发起open请求，而Camera HAL的open入口在QCamera2Hal.cpp进行了定义
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/QCamera2Hal.cpp]
+        // Camera dependencies
+        #include "QCamera2Factory.h"
+        #include "HAL3/QCamera3VendorTags.h"
+
+        static hw_module_t camera_common = {
+                                            .tag                    = HARDWARE_MODULE_TAG,
+                                            .module_api_version     = CAMERA_MODULE_API_VERSION_2_4,
+                                            .hal_api_version        = HARDWARE_HAL_API_VERSION,
+                                            .id                     = CAMERA_HARDWARE_MODULE_ID,
+                                            .name                   = "QCamera Module",
+                                            .author                 = "Qualcomm Innovation Center Inc",
+                                            // 通过methods 方法来发起Open请求
+                                            .methods                = &qcamera::QCamera2Factory::mModuleMethods,
+                                            .dso                    = NULL,
+                                            .reserved               = {0}
+        };
+
+        camera_module_t HAL_MODULE_INFO_SYM = {
+                                               .common                 = camera_common,
+                                               .get_number_of_cameras  = qcamera::QCamera2Factory::get_number_of_cameras,
+                                               .get_camera_info        = qcamera::QCamera2Factory::get_camera_info,
+                                               .set_callbacks          = qcamera::QCamera2Factory::set_callbacks,
+                                               .get_vendor_tag_ops     = qcamera::QCamera3VendorTags::get_vendor_tag_ops,
+                                               .open_legacy            = qcamera::QCamera2Factory::open_legacy,
+                                               .set_torch_mode         = qcamera::QCamera2Factory::set_torch_mode,
+                                               .init                   = NULL,
+                                               .reserved               = {0}
+        };
+      #+END_SRC
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/QCamera2Factory.cpp]
+        int QCamera2Factory::camera_device_open(const struct hw_module_t *module, const char *id,
+                                                struct hw_device_t **hw_device)
+        {
+          int rc = NO_ERROR;
+          if (module != &HAL_MODULE_INFO_SYM.common) {
+            LOGE("Invalid module. Trying to open %p, expect %p",
+                 module, &HAL_MODULE_INFO_SYM.common);
+            return INVALID_OPERATION;
+          }
+          if (!id) {
+            LOGE("Invalid camera id");
+            return BAD_VALUE;
+          }
+        #ifdef QCAMERA_HAL1_SUPPORT
+          if(gQCameraMuxer)
+            rc =  gQCameraMuxer->camera_device_open(module, id, hw_device);
+          else
+        #endif
+            // camera_device_open方法再次调用cameraDeviceOpen方法
+            rc = gQCamera2Factory->cameraDeviceOpen(atoi(id), hw_device);
+          return rc;
+        }
+
+        struct hw_module_methods_t QCamera2Factory::mModuleMethods = {
+                                                                      // 这里调用了camera_device_open 方法
+                                                                      .open = QCamera2Factory::camera_device_open,
+        };
+      #+END_SRC
+      + Camera HAL层的入口函数就是camera_device_open方法。
+   2. 它调用了cameraDeviceOpen方法，而其中的hw_device就是最后要返回给应用层的CameraDeviceImpl在Camera HAL层的对象，也就是说该camera_device_open主要是为了获取 hw_device_t 对象，继续分析cameraDeviceOpen方法：
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/QCamera2Factory.cpp]
+        int QCamera2Factory::cameraDeviceOpen(int camera_id,
+                                              struct hw_device_t **hw_device)
+        {
+          int rc = NO_ERROR;
+          if (camera_id < 0 || camera_id >= mNumOfCameras)
+            return -ENODEV;
+
+          if ( NULL == mHalDescriptors ) {
+            LOGE("Hal descriptor table is not initialized!");
+            return NO_INIT;
+          }
+
+          LOGI("Open camera id %d API version %d",
+               camera_id, mHalDescriptors[camera_id].device_version);
+          // 这里判断HAL版本,是否HAL3.0
+          if ( mHalDescriptors[camera_id].device_version == CAMERA_DEVICE_API_VERSION_3_0 ) {
+            CAMSCOPE_INIT(CAMSCOPE_SECTION_HAL);
+            // 实例化QCamera3HardwareInterface 对象，这里构造函数会进行configure_stream以及process_capture_result等的绑定。
+            QCamera3HardwareInterface *hw = new QCamera3HardwareInterface(mHalDescriptors[camera_id].cameraId,
+                                                                          mCallbacks);
+            if (!hw) {
+              LOGE("Allocation of hardware interface failed");
+              return NO_MEMORY;
+            }
+            // 通过QCamera3HarewareInterface来打开Camera
+            rc = hw->openCamera(hw_device);
+            if (rc != 0) {
+              delete hw;
+            }
+          }
+        #ifdef QCAMERA_HAL1_SUPPORT
+          else if (mHalDescriptors[camera_id].device_version == CAMERA_DEVICE_API_VERSION_1_0) {
+            // HAL1.0
+            QCamera2HardwareInterface *hw = new QCamera2HardwareInterface((uint32_t)camera_id);
+            if (!hw) {
+              LOGE("Allocation of hardware interface failed");
+              return NO_MEMORY;
+            }
+            rc = hw->openCamera(hw_device);
+            if (rc != NO_ERROR) {
+              delete hw;
+            }
+          }
+        #endif
+          else {
+            LOGE("Device version for camera id %d invalid %d",
+                 camera_id,
+                 mHalDescriptors[camera_id].device_version);
+            return BAD_VALUE;
+          }
+
+          return rc;
+        }
+      #+END_SRC
+      + 此方法有两个关键点：一个是QCamera3HardwareInterface对象hw的创建，它是用户空间与内核空间进行交互的接口；另一个是调用hw的openCamera方法来打开Camera，下面将分别进行分析。
+      + QCamera3HardwareInterface构造函数分析
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/HAL3/QCamera3HWI.cpp]
+        QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
+                                                             const camera_module_callbacks_t *callbacks):
+        {
+          ...
+          mCameraDevice.common.close = close_camera_device;
+          // 关键且重要的初始化过程，负责配置流数据相关处理以及处理结果接口
+          mCameraDevice.ops = &mCameraOps;
+          mCameraDevice.priv = this;
+          ...
+            }
+        camera3_device_ops_t QCamera3HardwareInterface::mCameraOps = {
+                                                                      .initialize                         = QCamera3HardwareInterface::initialize,
+                                                                      // 配置流处理接口
+                                                                      .configure_streams                  = QCamera3HardwareInterface::configure_streams,
+                                                                      .register_stream_buffers            = NULL,
+                                                                      .construct_default_request_settings = QCamera3HardwareInterface::construct_default_request_settings,
+                                                                      // 处理结果的接口
+                                                                      .process_capture_request            = QCamera3HardwareInterface::process_capture_request,
+                                                                      .get_metadata_vendor_tag_ops        = NULL,
+                                                                      .dump                               = QCamera3HardwareInterface::dump,
+                                                                      .flush                              = QCamera3HardwareInterface::flush,
+                                                                      .reserved                           = {0},
+        };
+
+
+        int QCamera3HardwareInterface::configure_streams(const struct camera3_device *device,
+                                                         camera3_stream_configuration_t *stream_list)
+        {
+          LOGD("E");
+          // 获取 QCamera3HardwareInterface 对象 hw
+          QCamera3HardwareInterface *hw =
+            reinterpret_cast<QCamera3HardwareInterface *>(device->priv);
+          if (!hw) {
+            LOGE("NULL camera device");
+            return -ENODEV;
+          }
+          // 调用 hw->configureStreams 方法
+          int rc = hw->configureStreams(stream_list);
+          LOGD("X");
+          return rc;
+        }
+        int QCamera3HardwareInterface::configureStreams(camera3_stream_configuration_t *streamList)
+        {
+          ATRACE_CAMSCOPE_CALL(CAMSCOPE_HAL3_CFG_STRMS);
+          int rc = 0;
+
+          // Acquire perfLock before configure streams
+          mPerfLockMgr.acquirePerfLock(PERF_LOCK_START_PREVIEW);
+          rc = configureStreamsPerfLocked(streamList);
+          mPerfLockMgr.releasePerfLock(PERF_LOCK_START_PREVIEW);
+
+          return rc;
+        }
+
+      #+END_SRC
+      + 其中 configure_streams 主要负责配置流处理接口，继续分析 configure_streams 方法，configureStreams 里面会调用 configureStreamsPerfLocked 方法,整个流的配置主要都是在该方法中完成的。
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/HAL3/QCamera3HWI.cpp]
+        int QCamera3HardwareInterface::configureStreamsPerfLocked(camera3_stream_configuration_t *streamList) {
+          ...
+          //初始化Camera版本
+          al_version = CAM_HAL_V3;
+          ...
+            //开始配置stream
+            ...
+            //初始化相关Channel为NULL
+            if (mMetadataChannel) {
+              delete mMetadataChannel;
+              mMetadataChannel = NULL;
+            }
+            if (mSupportChannel) {
+              delete mSupportChannel;
+              mSupportChannel = NULL;
+            }
+
+            if (mAnalysisChannel) {
+              delete mAnalysisChannel;
+              mAnalysisChannel = NULL;
+            }
+
+            //创建Metadata Channel，并对其进行初始化
+            mMetadataChannel = new QCamera3MetadataChannel(mCameraHandle->camera_handle,
+                                                           mCameraHandle->ops, captureResultCb,&gCamCapability[mCameraId]->padding_info,
+                                                           CAM_QCOM_FEATURE_NONE, this);
+            ...
+              //初始化
+              rc = mMetadataChannel->initialize(IS_TYPE_NONE);
+              ...
+                //如果h/w support可用，则创建分析stream的Channel
+                if (gCamCapability[mCameraId]->hw_analysis_supported) {
+                  mAnalysisChannel = new QCamera3SupportChannel(mCameraHandle->camera_handle,
+                                                                mCameraHandle->ops,&gCamCapability[mCameraId]->padding_info,
+                                                                CAM_QCOM_FEATURE_PP_SUPERSET_HAL3,CAM_STREAM_TYPE_ANALYSIS,
+                                                                &gCamCapability[mCameraId]->analysis_recommended_res,this);
+                  ...
+                    }
+
+                bool isRawStreamRequested = false;
+                //清空stream配置信息
+                memset(&mStreamConfigInfo, 0, sizeof(cam_stream_size_info_t));
+                //为requested stream分配相关的channel对象
+                for (size_t i = 0; i < streamList->num_streams; i++) {
+                  camera3_stream_t *newStream = streamList->streams[i];
+                  uint32_t stream_usage = newStream->usage;
+                  mStreamConfigInfo.stream_sizes[mStreamConfigInfo.num_streams].width = (int32_t)newStream-
+                    >width;
+                  mStreamConfigInfo.stream_sizes[mStreamConfigInfo.num_streams].height = (int32_t)newStream-
+                    >height;
+                  if ((newStream->stream_type == CAMERA3_STREAM_BIDIRECTIONAL||newStream->usage &
+                       GRALLOC_USAGE_HW_CAMERA_ZSL) &&newStream->format ==
+                      HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED && jpegStream){
+                    mStreamConfigInfo.type[mStreamConfigInfo.num_streams] = CAM_STREAM_TYPE_SNAPSHOT;
+                    mStreamConfigInfo.postprocess_mask[mStreamConfigInfo.num_streams] =
+                      CAM_QCOM_FEATURE_NONE;
+                  } else if(newStream->stream_type == CAMERA3_STREAM_INPUT) {
+                  } else {
+                    switch (newStream->format) {
+                      //为非zsl streams查找他们的format
+                      ...
+                    }
+                  }
+                  if (newStream->priv == NULL) {
+                    //为新的stream构造Channel
+                    switch (newStream->stream_type) {//分类型构造
+                    case CAMERA3_STREAM_INPUT:
+                      newStream->usage |= GRALLOC_USAGE_HW_CAMERA_READ;
+                      newStream->usage |= GRALLOC_USAGE_HW_CAMERA_WRITE;//WR for inplace algo's
+                      break;
+                    case CAMERA3_STREAM_BIDIRECTIONAL:
+                      ...
+                      break;
+                    case CAMERA3_STREAM_OUTPUT:
+                      ...
+                      break;
+                    default:
+                      break;
+                    }
+                    //根据前面的得到的stream的参数类型以及format分别对各类型的channel进行构造
+                    if (newStream->stream_type == CAMERA3_STREAM_OUTPUT ||
+                        newStream->stream_type == CAMERA3_STREAM_BIDIRECTIONAL) {
+                      QCamera3Channel *channel = NULL;
+                      switch (newStream->format) {
+                      case HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED:
+                        /* use higher number of buffers for HFR mode */
+                        ...
+                        //创建Regular Channel
+                        channel = new QCamera3RegularChannel(mCameraHandle->camera_handle,
+                                                             mCameraHandle->ops, captureResultCb,&gCamCapability[mCameraId]-
+                                                             >padding_info,this,newStream,(cam_stream_type_t)mStreamConfigInfo.type[
+                                                                                                                                    mStreamConfigInfo.num_streams],mStreamConfigInfo.postprocess_mask[
+                                                                                                                                                                                                      mStreamConfigInfo.num_streams],mMetadataChannel,numBuffers);
+                        ...
+                          newStream->max_buffers = channel->getNumBuffers();
+                          newStream->priv = channel;
+                          break;
+                      case HAL_PIXEL_FORMAT_YCbCr_420_888:
+                        //创建YWV Channel
+                        ...
+                        break;
+                      case HAL_PIXEL_FORMAT_RAW_OPAQUE:
+                      case HAL_PIXEL_FORMAT_RAW16:
+                      case HAL_PIXEL_FORMAT_RAW10:
+                        //创建Raw Channel
+                        ...
+                        break;
+                      case HAL_PIXEL_FORMAT_BLOB:
+                        //创建QCamera3PicChannel
+                        ...
+                        break;
+                      default:
+                        break;
+                      }
+                    } else if (newStream->stream_type == CAMERA3_STREAM_INPUT) {
+                      newStream->max_buffers = MAX_INFLIGHT_REPROCESS_REQUESTS;
+                    } else {
+                    }
+                    for (List<stream_info_t*>::iterator it=mStreamInfo.begin();it != mStreamInfo.end();
+                         it++) {
+                      if ((*it)->stream == newStream) {
+                        (*it)->channel = (QCamera3Channel*) newStream->priv;
+                        break;
+                      }
+                    }
+                  } else {
+                  }
+                  if (newStream->stream_type != CAMERA3_STREAM_INPUT)
+                    mStreamConfigInfo.num_streams++;
+                }
+        }
+        if (isZsl) {
+          if (mPictureChannel) {
+            mPictureChannel->overrideYuvSize(zslStream->width, zslStream->height);
+          }
+         } else if (mPictureChannel && m_bIs4KVideo) {
+          mPictureChannel->overrideYuvSize(videoWidth, videoHeight);
+         }
+
+        ...
+        }
+        //进行相关Channel的配置
+        ...
+        /* Initialize mPendingRequestInfo and mPendnigBuffersMap */
+        for (List<PendingRequestInfo>::iterator i = mPendingRequestsList.begin();
+             i != mPendingRequestsList.end(); i++) {
+          clearInputBuffer(i->input_buffer);
+          i = mPendingRequestsList.erase(i);
+         }
+        mPendingFrameDropList.clear();
+        // Initialize/Reset the pending buffers list
+        mPendingBuffersMap.num_buffers = 0;
+        mPendingBuffersMap.mPendingBufferList.clear();
+        mPendingReprocessResultList.clear();
+
+        return rc;
+        }
+      #+END_SRC
+      + 此方法内容比较多，只抽取其中核心的代码进行说明，它首先会根据HAL的版本来对stream进行相应的配置初始化，然后再根据stream类型对stream_list的stream创建相应的Channel，主要有QCamera3MetadataChannel，QCamera3SupportChannel等，然后再进行相应的配置，其中QCamera3MetadataChannel在后面的处理capture request的时候会用到。至此，QCamera3HardwareInterface构造结束，与本文相关的就是配置了mCameraDevice.ops。
+   3. 下面分析Module是如何打开Camera的，openCamera的代码如下：
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/HAL3/QCamera3HWI.cpp]
+        int QCamera3HardwareInterface::openCamera(struct hw_device_t **hw_device)
+        {
+          int rc = 0;
+          int enable_fdleak=0;
+          int enable_memleak=0;
+          char prop[PROPERTY_VALUE_MAX];
+          if (mState != CLOSED) {
+            ,*hw_device = NULL;
+            return PERMISSION_DENIED;
+          }
+
+          mPerfLockMgr.acquirePerfLock(PERF_LOCK_OPEN_CAMERA);
+          LOGI("[KPI Perf]: E PROFILE_OPEN_CAMERA camera id %d",
+               mCameraId);
+        #ifdef FDLEAK_FLAG
+          property_get("persist.vendor.camera.fdleak.enable", prop, "0");
+          enable_fdleak = atoi(prop);
+          if (enable_fdleak) {
+            LOGI("fdleak tool is enable for camera hal");
+            hal_debug_enable_fdleak_trace();
+          }
+        #endif
+        #ifdef MEMLEAK_FLAG
+          property_get("persist.vendor.camera.memleak.enable", prop, "0");
+          enable_memleak = atoi(prop);
+          if (enable_memleak) {
+            LOGI("memleak tool is enable for camera hal");
+            hal_debug_enable_memleak_trace();
+          }
+        #endif
+          rc = openCamera();
+          if (rc == 0) {
+            ,*hw_device = &mCameraDevice.common;
+          } else {
+            ,*hw_device = NULL;
+          }
+
+          LOGI("[KPI Perf]: X PROFILE_OPEN_CAMERA camera id %d, rc: %d",
+               mCameraId, rc);
+
+          if (rc == NO_ERROR) {
+            mState = OPENED;
+          }
+          return rc;
+        }
+        int QCamera3HardwareInterface::openCamera()
+        {
+          int rc = 0;
+          char value[PROPERTY_VALUE_MAX];
+
+          KPI_ATRACE_CAMSCOPE_CALL(CAMSCOPE_HAL3_OPENCAMERA);
+          if (mCameraHandle) {
+            LOGE("Failure: Camera already opened");
+            return ALREADY_EXISTS;
+          }
+
+          rc = QCameraFlash::getInstance().reserveFlashForCamera(mCameraId);
+          if (rc < 0) {
+            LOGE("Failed to reserve flash for camera id: %d",
+                 mCameraId);
+            return UNKNOWN_ERROR;
+          }
+
+          rc = camera_open((uint8_t)mCameraId, &mCameraHandle);
+          if (rc) {
+            LOGE("camera_open failed. rc = %d, mCameraHandle = %p", rc, mCameraHandle);
+            return rc;
+          }
+
+          if (!mCameraHandle) {
+            LOGE("camera_open failed. mCameraHandle = %p", mCameraHandle);
+            return -ENODEV;
+          }
+
+          rc = mCameraHandle->ops->register_event_notify(mCameraHandle->camera_handle,
+                                                         camEvtHandle, (void *)this);
+
+          if (rc < 0) {
+            LOGE("Error, failed to register event callback");
+            /* Not closing camera here since it is already handled in destructor */
+            return FAILED_TRANSACTION;
+          }
+
+          mExifParams.debug_params =
+            (mm_jpeg_debug_exif_params_t *) malloc (sizeof(mm_jpeg_debug_exif_params_t));
+          if (mExifParams.debug_params) {
+            memset(mExifParams.debug_params, 0, sizeof(mm_jpeg_debug_exif_params_t));
+          } else {
+            LOGE("Out of Memory. Allocation failed for 3A debug exif params");
+            return NO_MEMORY;
+          }
+          mFirstConfiguration = true;
+
+          //Notify display HAL that a camera session is active.
+          //But avoid calling the same during bootup because camera service might open/close
+          //cameras at boot time during its initialization and display service will also internally
+          //wait for camera service to initialize first while calling this display API, resulting in a
+          //deadlock situation. Since boot time camera open/close calls are made only to fetch
+          //capabilities, no need of this display bw optimization.
+          //Use "service.bootanim.exit" property to know boot status.
+          property_get("service.bootanim.exit", value, "0");
+          if (atoi(value) == 1) {
+            pthread_mutex_lock(&gCamLock);
+            if (gNumCameraSessions++ == 0) {
+              setCameraLaunchStatus(true);
+            }
+            pthread_mutex_unlock(&gCamLock);
+          }
+
+          //fill the session id needed while linking dual cam
+          pthread_mutex_lock(&gCamLock);
+          rc = mCameraHandle->ops->get_session_id(mCameraHandle->camera_handle,
+                                                  &sessionId[mCameraId]);
+          pthread_mutex_unlock(&gCamLock);
+
+          if (rc < 0) {
+            LOGE("Error, failed to get sessiion id");
+            return UNKNOWN_ERROR;
+          } else {
+            //Allocate related cam sync buffer
+            //this is needed for the payload that goes along with bundling cmd for related
+            //camera use cases
+            //Handle Dual camera cmd buffer
+            uint8_t buf_cnt = 1;
+            if (isDualCamera()) {
+              buf_cnt = MM_CAMERA_MAX_CAM_CNT;
+            }
+
+            m_pDualCamCmdHeap = new QCamera3HeapMemory(buf_cnt);
+            rc = m_pDualCamCmdHeap->allocate(sizeof(cam_dual_camera_cmd_info_t));
+            if(rc != OK) {
+              rc = NO_MEMORY;
+              LOGE("Dualcam: Failed to allocate Related cam sync Heap memory");
+              return NO_MEMORY;
+            }
+            for (int i = 0; i < buf_cnt; i++) {
+              m_pDualCamCmdPtr[i] = (cam_dual_camera_cmd_info_t *)
+                DATA_PTR(m_pDualCamCmdHeap, i);
+            }
+
+            //Map memory for related cam sync buffer
+            rc = mCameraHandle->ops->map_buf(get_main_camera_handle(mCameraHandle->camera_handle),
+                                             CAM_MAPPING_BUF_TYPE_DUAL_CAM_CMD_BUF,
+                                             m_pDualCamCmdHeap->getFd(0),
+                                             sizeof(cam_dual_camera_cmd_info_t),
+                                             m_pDualCamCmdHeap->getPtr(0));
+            if(rc < 0) {
+              LOGE("Dualcam: failed to map Related cam sync buffer");
+              rc = FAILED_TRANSACTION;
+              return NO_MEMORY;
+            }
+
+            if (isDualCamera()) {
+              rc = mCameraHandle->ops->map_buf(
+                                               get_aux_camera_handle(mCameraHandle->camera_handle),
+                                               CAM_MAPPING_BUF_TYPE_DUAL_CAM_CMD_BUF,
+                                               m_pDualCamCmdHeap->getFd(1),
+                                               sizeof(cam_dual_camera_cmd_info_t),
+                                               m_pDualCamCmdPtr[1]);
+              if(rc < 0) {
+                LOGE("failed to map Related cam sync buffer");
+                rc = FAILED_TRANSACTION;
+                return NO_MEMORY;
+              }
+            }
+          }
+
+          if (isDualCamera()) {
+            // Create and initialize FOV-control object
+            m_pFovControl = QCameraFOVControl::create(
+                                                      gCamCapability[mCameraId]->main_cam_cap,
+                                                      gCamCapability[mCameraId]->aux_cam_cap, true);
+            if (m_pFovControl) {
+              mDualCamType = (uint8_t)QCameraCommon::getDualCameraConfig(
+                                                                         gCamCapability[mCameraId]->main_cam_cap,
+                                                                         gCamCapability[mCameraId]->aux_cam_cap);
+              m_pFovControl->setDualCameraConfig(mDualCamType);
+            }
+            mActiveCameras = MM_CAMERA_DUAL_CAM;
+          }
+
+          LOGH("mCameraId=%d",mCameraId);
+
+          return NO_ERROR;
+        }
+
+      #+END_SRC
+      + 它调用了 openCamera 方法来打开Camera,并且向CameraHandle注册了Camera 时间处理的Handle–camEvtHandle，首先分析camera_open方法，这里就将进入高通的Camera的实现了，而Mm_camera_interface.c是高通提供的相关操作的接口，接下来分析高通Camera的camera_open方法:
+      #+BEGIN_SRC cpp
+        [hardware/qcom/camera/QCamera2/stack/mm-camera-interface/src/mm_camera_interface.c]
+        int32_t camera_open(uint8_t camera_idx, mm_camera_vtbl_t **camera_vtbl)
+        {
+          int32_t rc = 0;
+          mm_camera_obj_t *cam_obj = NULL;
+          uint32_t cam_idx = camera_idx;
+          uint32_t aux_idx = 0;
+          uint8_t is_multi_camera = 0;
+
+        #ifdef QCAMERA_REDEFINE_LOG
+          mm_camera_debug_open();
+        #endif
+
+          LOGD("E camera_idx = %d\n", camera_idx);
+          // 重要，这个地方通过camera id来区分是否是双摄模式
+          if (is_dual_camera_by_idx(camera_idx)) {
+            is_multi_camera = 1;
+            cam_idx = mm_camera_util_get_handle_by_num(0,
+                                                       g_cam_ctrl.cam_index[camera_idx]);
+            aux_idx = (get_aux_camera_handle(g_cam_ctrl.cam_index[camera_idx])
+                       >> MM_CAMERA_HANDLE_SHIFT_MASK);
+            LOGH("Dual Camera: Main ID = %d Aux ID = %d", cam_idx, aux_idx);
+          }
+
+          if (cam_idx >= (uint32_t)g_cam_ctrl.num_cam || cam_idx >=
+              MM_CAMERA_MAX_NUM_SENSORS || aux_idx >= MM_CAMERA_MAX_NUM_SENSORS) {
+            LOGE("Invalid camera_idx (%d)", cam_idx);
+            return -EINVAL;
+          }
+
+          pthread_mutex_lock(&g_intf_lock);
+          /* opened already */
+          if(NULL != g_cam_ctrl.cam_obj[cam_idx] &&
+             g_cam_ctrl.cam_obj[cam_idx]->ref_count != 0) {
+            pthread_mutex_unlock(&g_intf_lock);
+            LOGE("Camera %d is already open", cam_idx);
+            return -EBUSY;
+          }
+
+          cam_obj = (mm_camera_obj_t *)malloc(sizeof(mm_camera_obj_t));
+          if(NULL == cam_obj) {
+            pthread_mutex_unlock(&g_intf_lock);
+            LOGE("no mem");
+            return -EINVAL;
+          }
+
+          /* initialize camera obj */
+          memset(cam_obj, 0, sizeof(mm_camera_obj_t));
+          cam_obj->ctrl_fd = -1;
+          cam_obj->ds_fd = -1;
+          cam_obj->ref_count++;
+          cam_obj->my_num = 0;
+          cam_obj->my_hdl = mm_camera_util_generate_handler(cam_idx);
+          cam_obj->vtbl.camera_handle = cam_obj->my_hdl; /* set handler */
+          cam_obj->vtbl.ops = &mm_camera_ops;
+          pthread_mutex_init(&cam_obj->cam_lock, NULL);
+          pthread_mutex_init(&cam_obj->muxer_lock, NULL);
+          /* unlock global interface lock, if not, in dual camera use case,
+           ,* current open will block operation of another opened camera obj*/
+          pthread_mutex_lock(&cam_obj->cam_lock);
+          pthread_mutex_unlock(&g_intf_lock);
+
+          rc = mm_camera_open(cam_obj);
+          if (rc != 0) {
+            LOGE("mm_camera_open err = %d", rc);
+            pthread_mutex_destroy(&cam_obj->cam_lock);
+            pthread_mutex_lock(&g_intf_lock);
+            g_cam_ctrl.cam_obj[cam_idx] = NULL;
+            free(cam_obj);
+            cam_obj = NULL;
+            pthread_mutex_unlock(&g_intf_lock);
+            ,*camera_vtbl = NULL;
+            return rc;
+          }
+
+          if (is_multi_camera) {
+            /*Open Aux camer's*/
+            pthread_mutex_lock(&g_intf_lock);
+            if(NULL != g_cam_ctrl.cam_obj[aux_idx] &&
+               g_cam_ctrl.cam_obj[aux_idx]->ref_count != 0) {
+              pthread_mutex_unlock(&g_intf_lock);
+              LOGE("Camera %d is already open", aux_idx);
+              rc = -EBUSY;
+            } else {
+              pthread_mutex_lock(&cam_obj->muxer_lock);
+              pthread_mutex_unlock(&g_intf_lock);
+              rc = mm_camera_muxer_camera_open(aux_idx, cam_obj);
+            }
+            if (rc != 0) {
+              int32_t temp_rc = 0;
+              LOGE("muxer open err = %d", rc);
+              pthread_mutex_lock(&g_intf_lock);
+              g_cam_ctrl.cam_obj[cam_idx] = NULL;
+              pthread_mutex_lock(&cam_obj->cam_lock);
+              pthread_mutex_unlock(&g_intf_lock);
+              temp_rc = mm_camera_close(cam_obj);
+              pthread_mutex_destroy(&cam_obj->cam_lock);
+              pthread_mutex_destroy(&cam_obj->muxer_lock);
+              free(cam_obj);
+              cam_obj = NULL;
+              ,*camera_vtbl = NULL;
+              // Propagate the original error to caller
+              return rc;
+            }
+          }
+
+          LOGH("Open succeded: handle = %d", cam_obj->vtbl.camera_handle);
+          g_cam_ctrl.cam_obj[cam_idx] = cam_obj;
+          *camera_vtbl = &cam_obj->vtbl;
+          return 0;
+        }
+        static mm_camera_ops_t mm_camera_ops = {
+                                                .query_capability = mm_camera_intf_query_capability,
+                                                .register_event_notify = mm_camera_intf_register_event_notify,
+                                                .close_camera = mm_camera_intf_close,
+                                                .set_parms = mm_camera_intf_set_parms,
+                                                .get_parms = mm_camera_intf_get_parms,
+                                                .do_auto_focus = mm_camera_intf_do_auto_focus,
+                                                .cancel_auto_focus = mm_camera_intf_cancel_auto_focus,
+                                                .prepare_snapshot = mm_camera_intf_prepare_snapshot,
+                                                .start_zsl_snapshot = mm_camera_intf_start_zsl_snapshot,
+                                                .stop_zsl_snapshot = mm_camera_intf_stop_zsl_snapshot,
+                                                .map_buf = mm_camera_intf_map_buf,
+                                                .map_bufs = mm_camera_intf_map_bufs,
+                                                .unmap_buf = mm_camera_intf_unmap_buf,
+                                                .add_channel = mm_camera_intf_add_channel,
+                                                .delete_channel = mm_camera_intf_del_channel,
+                                                .get_bundle_info = mm_camera_intf_get_bundle_info,
+                                                .add_stream = mm_camera_intf_add_stream,
+                                                .link_stream = mm_camera_intf_link_stream,
+                                                .delete_stream = mm_camera_intf_del_stream,
+                                                .config_stream = mm_camera_intf_config_stream,
+                                                .qbuf = mm_camera_intf_qbuf,
+                                                .cancel_buffer = mm_camera_intf_cancel_buf,
+                                                .get_queued_buf_count = mm_camera_intf_get_queued_buf_count,
+                                                .map_stream_buf = mm_camera_intf_map_stream_buf,
+                                                .map_stream_bufs = mm_camera_intf_map_stream_bufs,
+                                                .unmap_stream_buf = mm_camera_intf_unmap_stream_buf,
+                                                .set_stream_parms = mm_camera_intf_set_stream_parms,
+                                                .get_stream_parms = mm_camera_intf_get_stream_parms,
+                                                .start_channel = mm_camera_intf_start_channel,
+                                                .stop_channel = mm_camera_intf_stop_channel,
+                                                .request_super_buf = mm_camera_intf_request_super_buf,
+                                                .cancel_super_buf_request = mm_camera_intf_cancel_super_buf_request,
+                                                .flush_super_buf_queue = mm_camera_intf_flush_super_buf_queue,
+                                                .configure_notify_mode = mm_camera_intf_configure_notify_mode,
+                                                .process_advanced_capture = mm_camera_intf_process_advanced_capture,
+                                                .get_session_id = mm_camera_intf_get_session_id,
+                                                .set_dual_cam_cmd = mm_camera_intf_set_dual_cam_cmd,
+                                                .flush = mm_camera_intf_flush,
+                                                .register_stream_buf_cb = mm_camera_intf_register_stream_buf_cb,
+                                                .register_frame_sync = mm_camera_intf_reg_frame_sync,
+                                                .handle_frame_sync_cb = mm_camera_intf_handle_frame_sync_cb
+        };
+
+      #+END_SRC
+      + 由代码可知，这里将会初始化一个mm_camera_obj_t对象，其中，ds_fd为socket fd，而mm_camera_ops则绑定了相关的接口，最后调用mm_camera_open来打开Camera。
+      #+BEGIN_SRC c
+        [hardware/qcom/camera/QCamera2/stack/mm-camera-interface/src/mm_camera.c]
+        int32_t mm_camera_open(mm_camera_obj_t *my_obj)
+        {
+          char dev_name[MM_CAMERA_DEV_NAME_LEN];
+          int32_t rc = 0;
+          int8_t n_try=MM_CAMERA_DEV_OPEN_TRIES;
+          uint8_t sleep_msec=MM_CAMERA_DEV_OPEN_RETRY_SLEEP;
+          int cam_idx = 0;
+          const char *dev_name_value = NULL;
+          int l_errno = 0;
+          pthread_condattr_t cond_attr;
+
+          LOGD("begin\n");
+
+          if (NULL == my_obj) {
+            goto on_error;
+          }
+
+          dev_name_value = mm_camera_util_get_dev_name_by_num(my_obj->my_num,
+                                                              my_obj->my_hdl);
+          if (NULL == dev_name_value) {
+            goto on_error;
+          }
+          snprintf(dev_name, sizeof(dev_name), "/dev/%s",
+                   dev_name_value);
+          sscanf(dev_name, "/dev/video%d", &cam_idx);
+          LOGD("dev name = %s, cam_idx = %d", dev_name, cam_idx);
+
+          do{
+            n_try--;
+            errno = 0;
+            my_obj->ctrl_fd = open(dev_name, O_RDWR | O_NONBLOCK);
+            l_errno = errno;
+            LOGD("ctrl_fd = %d, errno == %d", my_obj->ctrl_fd, l_errno);
+            if((my_obj->ctrl_fd >= 0) || (errno != EIO && errno != ETIMEDOUT) || (n_try <= 0 )) {
+              break;
+            }
+            LOGE("Failed with %s error, retrying after %d milli-seconds",
+                 strerror(errno), sleep_msec);
+            usleep(sleep_msec * 1000U);
+          }while (n_try > 0);
+
+          if (my_obj->ctrl_fd < 0) {
+            LOGE("cannot open control fd of '%s' (%s)\n",
+                 dev_name, strerror(l_errno));
+            if (l_errno == EBUSY)
+              rc = -EUSERS;
+            else
+              rc = -1;
+            goto on_error;
+          } else {
+            mm_camera_get_session_id(my_obj, &my_obj->sessionid);
+            LOGH("Camera Opened id = %d sessionid = %d", cam_idx, my_obj->sessionid);
+          }
+
+        #ifdef DAEMON_PRESENT
+          /* open domain socket*/
+          n_try = MM_CAMERA_DEV_OPEN_TRIES;
+          do {
+            n_try--;
+            my_obj->ds_fd = mm_camera_socket_create(cam_idx, MM_CAMERA_SOCK_TYPE_UDP);
+            l_errno = errno;
+            LOGD("ds_fd = %d, errno = %d", my_obj->ds_fd, l_errno);
+            if((my_obj->ds_fd >= 0) || (n_try <= 0 )) {
+              LOGD("opened, break out while loop");
+              break;
+            }
+            LOGD("failed with I/O error retrying after %d milli-seconds",
+                 sleep_msec);
+            usleep(sleep_msec * 1000U);
+          } while (n_try > 0);
+
+          if (my_obj->ds_fd < 0) {
+            LOGE("cannot open domain socket fd of '%s'(%s)\n",
+                 dev_name, strerror(l_errno));
+            rc = -1;
+            goto on_error;
+          }
+        #else /* DAEMON_PRESENT */
+          cam_status_t cam_status;
+          cam_status = mm_camera_module_open_session(my_obj->sessionid,
+                                                     mm_camera_module_event_handler);
+          if (cam_status < 0) {
+            LOGE("Failed to open session");
+            if (cam_status == CAM_STATUS_BUSY) {
+              rc = -EUSERS;
+            } else {
+              rc = -1;
+            }
+            goto on_error;
+          }
+        #endif /* DAEMON_PRESENT */
+
+          pthread_condattr_init(&cond_attr);
+          pthread_condattr_setclock(&cond_attr, CLOCK_MONOTONIC);
+
+          pthread_mutex_init(&my_obj->msg_lock, NULL);
+          pthread_mutex_init(&my_obj->cb_lock, NULL);
+          pthread_mutex_init(&my_obj->evt_lock, NULL);
+          pthread_cond_init(&my_obj->evt_cond, &cond_attr);
+          pthread_condattr_destroy(&cond_attr);
+
+          LOGD("Launch evt Thread in Cam Open");
+          snprintf(my_obj->evt_thread.threadName, THREAD_NAME_SIZE, "CAM_Dispatch");
+          mm_camera_cmd_thread_launch(&my_obj->evt_thread,
+                                      mm_camera_dispatch_app_event,
+                                      (void *)my_obj);
+
+          /* launch event poll thread
+           * we will add evt fd into event poll thread upon user first register for evt */
+          LOGD("Launch evt Poll Thread in Cam Open");
+          snprintf(my_obj->evt_poll_thread.threadName, THREAD_NAME_SIZE, "CAM_evntPoll");
+          mm_camera_poll_thread_launch(&my_obj->evt_poll_thread,
+                                       MM_CAMERA_POLL_TYPE_EVT);
+          mm_camera_evt_sub(my_obj, TRUE);
+
+          /* unlock cam_lock, we need release global intf_lock in camera_open(),
+           * in order not block operation of other Camera in dual camera use case.*/
+          pthread_mutex_unlock(&my_obj->cam_lock);
+          LOGD("end (rc = %d)\n", rc);
+          return rc;
+
+         on_error:
+
+          if (NULL == dev_name_value) {
+            LOGE("Invalid device name\n");
+            rc = -1;
+          }
+
+          if (NULL == my_obj) {
+            LOGE("Invalid camera object\n");
+            rc = -1;
+          } else {
+            if (my_obj->ctrl_fd >= 0) {
+              close(my_obj->ctrl_fd);
+              my_obj->ctrl_fd = -1;
+            }
+        #ifdef DAEMON_PRESENT
+            if (my_obj->ds_fd >= 0) {
+              mm_camera_socket_close(my_obj->ds_fd);
+              my_obj->ds_fd = -1;
+            }
+        #endif
+          }
+
+          /* unlock cam_lock, we need release global intf_lock in camera_open(),
+           * in order not block operation of other Camera in dual camera use case.*/
+          pthread_mutex_unlock(&my_obj->cam_lock);
+          return rc;
+        }
+
+      #+END_SRC
+      + mm_camera_open 会打开Camera的设备文件，然后开启dispatch_app_event线程，线程方法体mm_camera_dispatch_app_event方法代码如下：
+      #+BEGIN_SRC cpp
+        [->/hardware/qcom/camera/QCamera2/stack/mm-camera-interface/src/mm_camera.c]
+        static void mm_camera_dispatch_app_event(mm_camera_cmdcb_t *cmd_cb,void* user_data){
+          mm_camera_cmd_thread_name("mm_cam_event");
+          int i;
+          mm_camera_event_t *event = &cmd_cb->u.evt;
+          mm_camera_obj_t * my_obj = (mm_camera_obj_t *)user_data;
+          if (NULL != my_obj) {
+            pthread_mutex_lock(&my_obj->cb_lock);
+            for(i = 0; i < MM_CAMERA_EVT_ENTRY_MAX; i++) {
+              if(my_obj->evt.evt[i].evt_cb) {
+                //调用camEvtHandle方法
+                my_obj->evt.evt[i].evt_cb(
+                                          my_obj->my_hdl,
+                                          event,
+                                          my_obj->evt.evt[i].user_data);
+              }
+            }
+            pthread_mutex_unlock(&my_obj->cb_lock);
+          }
+        }
+      #+END_SRC
+      + 最后会调用mm-camera-interface中注册好的事件处理evt_cb，它就是在前面注册好的camEvtHandle：
+      #+BEGIN_SRC cpp
+        [->\hardware\qcom\camera\QCamera2\HAL3\QCamera3HWI.cpp]
+        void QCamera3HardwareInterface::camEvtHandle(uint32_t /*camera_handle*/,mm_camera_event_t *evt,
+                                                     void *user_data){
+          //获取QCamera3HardwareInterface接口指针
+          QCamera3HardwareInterface *obj = (QCamera3HardwareInterface *)user_data;
+          if (obj && evt) {
+            switch(evt->server_event_type) {
+            case CAM_EVENT_TYPE_DAEMON_DIED:
+              camera3_notify_msg_t notify_msg;
+              memset(&notify_msg, 0, sizeof(camera3_notify_msg_t));
+              notify_msg.type = CAMERA3_MSG_ERROR;
+              notify_msg.message.error.error_code = CAMERA3_MSG_ERROR_DEVICE;
+              notify_msg.message.error.error_stream = NULL;
+              notify_msg.message.error.frame_number = 0;
+              obj->mCallbackOps->notify(obj->mCallbackOps, &notify_msg);
+              break;
+
+            case CAM_EVENT_TYPE_DAEMON_PULL_REQ:
+              pthread_mutex_lock(&obj->mMutex);
+              obj->mWokenUpByDaemon = true;
+              //开启process_capture_request
+              obj->unblockRequestIfNecessary();
+              pthread_mutex_unlock(&obj->mMutex);
+              break;
+
+            default:
+              break;
+            }
+          } else {
+          }
+        }
+      #+END_SRC
+      + 由代码可知，它会调用QCamera3HardwareInterface的unblockRequestIfNecessary来发起结果处理请求：
+      #+BEGIN_SRC cpp
+        [->\hardware\qcom\camera\QCamera2\HAL3\QCamera3HWI.cpp]
+        void QCamera3HardwareInterface::unblockRequestIfNecessary()
+        {
+          // Unblock process_capture_request
+          //开启process_capture_request
+          pthread_cond_signal(&mRequestCond);
+        }
+      #+END_SRC
+      + 在初始化QCamera3HardwareInterface对象的时候，就绑定了处理Metadata的回调captureResultCb方法：它主要是对数据源进行相应的处理，而具体的capture请求的结果处理还是由process_capture_request来进行处理的，而这里会调用方法unblockRequestIfNecessary来触发process_capture_request方法执行，而在Camera框架中，发起请求时会启动一个RequestThread线程，在它的threadLoop方法中，会不停的调用process_capture_request方法来进行请求的处理，而它最后会回调Camera3Device中的processCaptureResult方法来进行结果处理：
+      #+BEGIN_SRC cpp
+        [->/frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp]
+        void Camera3Device::processCaptureResult(const camera3_capture_result *result) {
+          ...
+          {
+            ...
+            if (mUsePartialResult && result->result != NULL) {
+              if (mDeviceVersion >= CAMERA_DEVICE_API_VERSION_3_2) {
+                ...
+                if (isPartialResult) {
+                  request.partialResult.collectedResult.append(result->result);
+                }
+              } else {
+                camera_metadata_ro_entry_t partialResultEntry;
+                res = find_camera_metadata_ro_entry(result->result,
+                                                    ANDROID_QUIRKS_PARTIAL_RESULT, &partialResultEntry);
+                if (res != NAME_NOT_FOUND &&partialResultEntry.count > 0 &&
+                    partialResultEntry.data.u8[0] ==ANDROID_QUIRKS_PARTIAL_RESULT_PARTIAL) {
+                  isPartialResult = true;
+                  request.partialResult.collectedResult.append(
+                                                               result->result);
+                  request.partialResult.collectedResult.erase(
+                                                              ANDROID_QUIRKS_PARTIAL_RESULT);
+                }
+              }
+
+              if (isPartialResult) {
+                // Fire off a 3A-only result if possible
+                if (!request.partialResult.haveSent3A) {
+                  //处理3A结果
+                  request.partialResult.haveSent3A =processPartial3AResult(frameNumber,
+                                                                           request.partialResult.collectedResult,request.resultExtras);
+                }
+              }
+            }
+            ...
+              //查找camera元数据入口
+              camera_metadata_ro_entry_t entry;
+              res = find_camera_metadata_ro_entry(result->result,
+                                                  ANDROID_SENSOR_TIMESTAMP, &entry);
+
+              if (shutterTimestamp == 0) {
+                request.pendingOutputBuffers.appendArray(result->output_buffers,
+                                                         result->num_output_buffers);
+              } else {
+                重要的分析//返回处理的outputbuffer
+                  returnOutputBuffers(result->output_buffers,
+                                      result->num_output_buffers, shutterTimestamp);
+              }
+
+              if (result->result != NULL && !isPartialResult) {
+                if (shutterTimestamp == 0) {
+                  request.pendingMetadata = result->result;
+                  request.partialResult.collectedResult = collectedPartialResult;
+                } else {
+                  CameraMetadata metadata;
+                  metadata = result->result;
+                  //发送Capture结构，即调用通知回调
+                  sendCaptureResult(metadata, request.resultExtras,
+                                    collectedPartialResult, frameNumber, hasInputBufferInRequest,
+                                    request.aeTriggerCancelOverride);
+                }
+              }
+
+              removeInFlightRequestIfReadyLocked(idx);
+          } // scope for mInFlightLock
+
+          if (result->input_buffer != NULL) {
+            if (hasInputBufferInRequest) {
+              Camera3Stream *stream =
+                Camera3Stream::cast(result->input_buffer->stream);
+              重要的分析//返回处理的inputbuffer
+                res = stream->returnInputBuffer(*(result->input_buffer));
+            } else {}
+          }
+        }
+      #+END_SRC
+      + 分析returnOutputBuffers方法，inputbuffer的runturnInputBuffer方法流程类似：
+      #+BEGIN_SRC cpp
+        [->/frameworks/av/services/camera/libcameraservice/device3/Camera3Device.cpp]
+        void Camera3Device::returnOutputBuffers(const camera3_stream_buffer_t *outputBuffers, size_t
+                                                numBuffers, nsecs_t timestamp) {
+          for (size_t i = 0; i < numBuffers; i++)
+            {
+              Camera3Stream *stream = Camera3Stream::cast(outputBuffers[i].stream);
+              status_t res = stream->returnBuffer(outputBuffers[i], timestamp);
+              ...
+                }
+        }
+      #+END_SRC
+      + 方法里调用了returnBuffer方法：
+      #+BEGIN_SRC cpp
+        [->/frameworks/av/services/camera/libcameraservice/device3/Camera3Stream.cpp]
+        status_t Camera3Stream::returnBuffer(const camera3_stream_buffer &buffer,nsecs_t timestamp) {
+          //返回buffer
+          status_t res = returnBufferLocked(buffer, timestamp);
+          if (res == OK) {
+            fireBufferListenersLocked(buffer, /*acquired*/false, /*output*/true);
+            mOutputBufferReturnedSignal.signal();
+          }
+          return res;
+        }
+      #+END_SRC
+      + 再继续看returnBufferLocked,它调用了returnAnyBufferLocked方法，而returnAnyBufferLocked方法又调用了returnBufferCheckedLocked方法，现在分析returnBufferCheckedLocked：
+      #+BEGIN_SRC cpp
+        [->/frameworks/av/services/camera/libcameraservice/device3/Camera3OutputStream.cpp]
+        status_t Camera3OutputStream::returnBufferCheckedLocked(const camera3_stream_buffer &buffer,
+                                                                nsecs_t timestamp,bool output,/*out*/sp<Fence> *releaseFenceOut) {
+          ...
+          // Fence management - always honor release fence from HAL
+          sp<Fence> releaseFence = new Fence(buffer.release_fence);
+          int anwReleaseFence = releaseFence->dup();
+
+
+          if (buffer.status == CAMERA3_BUFFER_STATUS_ERROR) {
+            // Cancel buffer
+            res = currentConsumer->cancelBuffer(currentConsumer.get(),
+                                                container_of(buffer.buffer, ANativeWindowBuffer, handle),
+                                                anwReleaseFence);
+            ...
+              } else {
+            ...
+            res = currentConsumer->queueBuffer(currentConsumer.get(),
+                                               container_of(buffer.buffer, ANativeWindowBuffer, handle),
+                                               anwReleaseFence);
+            ...
+              }
+          ...
+            return res;
+        }
+
+      #+END_SRC
+      + 由代码可知，如果Buffer没有出现状态错误，它会调用currentConsumer的queueBuffer方法，而具体的Consumer则是在应用层初始化Camera时进行绑定的，典型的Consumer有SurfaceTexture，ImageReader等，而在Native层中，它会调用BufferQueueProducer的queueBuffer方法：
+      #+BEGIN_SRC cpp
+        [->\frameworks\native\libs\gui\BufferQueueProducer.cpp]
+        status_t BufferQueueProducer::queueBuffer(int slot,
+                                                  const QueueBufferInput &input, QueueBufferOutput *output) {
+          ...
+          //初始化Frame可用的监听器
+          sp<IConsumerListener> frameAvailableListener;
+          sp<IConsumerListener> frameReplacedListener;
+          int callbackTicket = 0;
+          BufferItem item;
+          { // Autolock scope
+            ...
+            const sp<GraphicBuffer>& graphicBuffer(mSlots[slot].mGraphicBuffer);
+            Rect bufferRect(graphicBuffer->getWidth(), graphicBuffer->getHeight());
+            Rect croppedRect;
+            crop.intersect(bufferRect, &croppedRect);
+            ...
+              //如果队列为空
+              if (mCore->mQueue.empty()) {
+                mCore->mQueue.push_back(item);
+                frameAvailableListener = mCore->mConsumerListener;
+              } else {
+                //否则，不为空，对Buffer进行处理，并获取FrameAvailableListener监听
+                BufferQueueCore::Fifo::iterator front(mCore->mQueue.begin());
+                if (front->mIsDroppable) {
+                  if (mCore->stillTracking(front)) {
+                    mSlots[front->mSlot].mBufferState = BufferSlot::FREE;
+                    mCore->mFreeBuffers.push_front(front->mSlot);
+                  }
+                  *front = item;
+                  frameReplacedListener = mCore->mConsumerListener;
+                } else {
+                  mCore->mQueue.push_back(item);
+                  frameAvailableListener = mCore->mConsumerListener;
+                }
+              }
+
+              mCore->mBufferHasBeenQueued = true;
+              mCore->mDequeueCondition.broadcast();
+
+              output->inflate(mCore->mDefaultWidth, mCore->mDefaultHeight,mCore->mTransformHint,
+                              static_cast<uint32_t>(mCore->mQueue.size()));
+
+              // Take a ticket for the callback functions
+              callbackTicket = mNextCallbackTicket++;
+
+              mCore->validateConsistencyLocked();
+          } // Autolock scope
+          ...
+            {
+              ...
+              if (frameAvailableListener != NULL) {
+                //回调SurfaceTexture中定义好的监听IConsumerListener的onFrameAvailable方法来对数据进行处理
+                frameAvailableListener->onFrameAvailable(item);
+              } else if (frameReplacedListener != NULL) {
+                frameReplacedListener->onFrameReplaced(item);
+              }
+
+              ++mCurrentCallbackTicket;
+              mCallbackCondition.broadcast();
+            }
+
+            return NO_ERROR;
+        }
+      #+END_SRC
+      + 由代码可知，它最后会调用Consumer的回调FrameAvailableListener的onFrameAvailable方法，到这里，就比较清晰为什么我们在写Camera应用，为其初始化Surface时，我们需要重写FrameAvailableListener了，因为在此方法里面，会进行结果的处理，至此，Camera HAL的Open流程就分析结束了。
+** Open流程时序图
+   #+begin_src plantuml :file ./pic/Camera_HAL3_Open.png
+     title Camera_HAL3_Open
+     autonumber
+     QCamera2Hal.cpp -> QCamera2Factory.cpp : camera_device_open()
+     activate QCamera2Factory.cpp
+       QCamera2Factory.cpp -> QCamera2Factory.cpp : cameraDeviceOpen()
+       activate QCamera2Factory.cpp
+         QCamera2Factory.cpp -> QCamera3HWI.cpp : new QCamera2HardwareInterface()
+         activate QCamera3HWI.cpp
+         deactivate QCamera3HWI.cpp
+         QCamera2Factory.cpp -> QCamera3HWI.cpp : OpenCamera()
+       deactivate QCamera2Factory.cpp
+       activate QCamera3HWI.cpp
+         QCamera3HWI.cpp -> QCamera3HWI.cpp : camera_open()
+       deactivate QCamera2Factory.cpp
+       activate QCamera3HWI.cpp
+         QCamera3HWI.cpp -> mm_camera_interface.cpp : camera_open()
+       deactivate QCamera3HWI.cpp
+       activate mm_camera_interface.cpp
+         mm_camera_interface.cpp -> mm_camera.c : if dualcam, mm_camera_open() twice
+         activate mm_camera.c
+           participant "/dev/video*" as dev
+           mm_camera.c -> dev : open()
+           activate dev
+           deactivate dev
+         deactivate mm_camera_interface.cpp
+         mm_camera.c -> mm_camera.c : mm_camera_socket_create()
+         activate mm_camera.c
+         deactivate mm_camera.c
+         QCamera3HWI.cpp -> QCamera3HWI.cpp : register_event_notify()
+         activate QCamera3HWI.cpp
+           QCamera3HWI.cpp -> QCamera3HWI.cpp : register camEvtHandle()
+           activate QCamera3HWI.cpp
+             mm_camera.c -> mm_camera.c : mm_camera_cmd_thread_launch()
+           deactivate QCamera3HWI.cpp
+           activate mm_camera.c
+             mm_camera.c -> Thread : Creat Thread()
+           deactivate QCamera3HWI.cpp
+         deactivate mm_camera.c
+         activate Thread
+         QCamera3HWI.cpp -> QCamera3HWI.cpp : Initialize dualcam related info and Fov control
+         deactivate mm_camera.c
+         activate QCamera3HWI.cpp
+         deactivate QCamera3HWI.cpp
+           Thread -> Thread : mm_camera_dispatch_app_event()
+         activate Thread
+         deactivate QCamera3HWI.cpp
+         deactivate QCamera3HWI.cpp
+         Thread -> QCamera3HWI.cpp : callback camEvthandle()
+       deactivate Thread
+       activate QCamera3HWI.cpp
+         QCamera3HWI.cpp -> QCamera3HWI.cpp : unblockRequestIfNecessary()
+         activate QCamera3HWI.cpp
+         deactivate Thread
+         QCamera3HWI.cpp -> QCamera3HWI.cpp : process_capture_request()
+       deactivate QCamera3HWI.cpp
+       QCamera3HWI.cpp -> Camera3Device.cpp : processCaptureResult()
+       activate Camera3Device.cpp
+         Camera3Device.cpp -> Camera3Device.cpp : returnOutputBuffers()
+       deactivate QCamera3HWI.cpp
+       activate Camera3Device.cpp
+         Camera3Device.cpp -> Camera3Stream.cpp : returnBuffer()
+         activate Camera3Stream.cpp
+         deactivate Camera3Device.cpp
+         Camera3Stream.cpp -> Camera3OutputStream.cpp : returnBufferLocked()
+       deactivate Camera3Device.cpp
+       activate Camera3OutputStream.cpp
+         Camera3OutputStream.cpp -> Camera3OutputStream.cpp : returnBufferCheckedLocked()
+       deactivate Camera3Stream.cpp
+       activate Camera3OutputStream.cpp
+         Camera3OutputStream.cpp -> Consumer : queueBuffer()
+       deactivate Camera3OutputStream.cpp
+       activate Consumer
+         Consumer -> BufferQueueProducer : queueBuffer()
+       deactivate Consumer
+     deactivate Camera3OutputStream.cpp
+     activate BufferQueueProducer
+       BufferQueueProducer -> FrameAvailableListener : onFrameAvailable()
+       activate FrameAvailableListener
+       deactivate FrameAvailableListener
+     deactivate BufferQueueProducer
+   #+end_src
+
+   #+RESULTS:
+   [[file:./pic/Camera_HAL3_Open.png]]
