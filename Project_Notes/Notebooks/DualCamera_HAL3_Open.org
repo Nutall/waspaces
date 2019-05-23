@@ -1117,7 +1117,7 @@
       #+END_SRC
       + 由代码可知，它最后会调用Consumer的回调FrameAvailableListener的onFrameAvailable方法，到这里，就比较清晰为什么我们在写Camera应用，为其初始化Surface时，我们需要重写FrameAvailableListener了，因为在此方法里面，会进行结果的处理，至此，Camera HAL的Open流程就分析结束了。
 ** Open流程时序图
-   #+begin_src plantuml :file ./pic/Camera_HAL3_Open.png
+   #+begin_src plantuml :file ./img/Camera_HAL3_Open.png
      title Camera_HAL3_Open
      autonumber
      QCamera2Hal.cpp -> QCamera2Factory.cpp : camera_device_open()
@@ -1201,4 +1201,4 @@
    #+end_src
 
    #+RESULTS:
-   [[file:./pic/Camera_HAL3_Open.png]]
+   [[file:./img/Camera_HAL3_Open.png]]
