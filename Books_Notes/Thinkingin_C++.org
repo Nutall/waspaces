@@ -20,5 +20,4 @@
 
        #+RESULTS:
        [[file:./img/interface.png]]
-
      * 发送请求就是调用类相应的接口。
