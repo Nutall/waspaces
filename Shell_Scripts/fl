@@ -1,0 +1,36 @@
+#!/bin/sh
+
+############################################################
+# Author: jun.yi
+# Date: 2017.12.07
+# Version: v0.0.1
+# Function: fastboot flash tools
+############################################################
+
+FLROOT=`pwd`
+PROJ_DIR=sdm710
+name=`basename $0 .sh`
+case $1 in
+    boot)
+        echo "start flash boot..."
+        fastboot flash boot $FLROOT/out/target/product/$PROJ_DIR/boot.img
+        ;;
+    userdata)
+        echo "start flash userdata..."
+        fastboot flash userdata $FLROOT/out/target/product/$PROJ_DIR/userdata.img
+        ;;
+    vendor)
+        echo "start flash vendor..."
+        fastboot flash vendor $FLROOT/out/target/product/$PROJ_DIR/vendor.img
+        ;;
+    system)
+        echo "start flash system..."
+        fastboot flash system $FLROOT/out/target/product/$PROJ_DIR/system.img
+        ;;
+    *)
+        echo "Usage: $name [boot|userdata|vendor|system]"
+        exit 1
+        ;;
+esac
+echo "Done!"
+exit 0

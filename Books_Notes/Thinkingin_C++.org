@@ -20,4 +20,285 @@
 
        #+RESULTS:
        [[file:./img/interface.png]]
+
      * 发送请求就是调用类相应的接口。
+** 实现的隐藏
+   * 访问控制
+** 实现的重用
+   * 组合(composition)或聚合(aggregation): has-a
+   * 继承(inheritance)
+     * 重载：改变基类函数的行为。
+     * is-a vs is-like-a
+** 具有多态性的可互换对象
+   * 早捆绑
+   * 晚捆绑
+** 创建和销魂对象
+   * 栈：自动变量或局部变量，不够灵活
+   * 静态存储区：程序开始前分配，不够灵活
+   * 堆：动态创建对象，自己创建，自己释放，灵活。
+** 分析和设计
+   * 有哪些对象？（如何将项目分成多个组成部分？）
+   * 它们的接口是什么？（需要向每个对象发送什么信息？）
+**** 第0阶段：指定计划
+     * 设定阶段目标，而不只是“完成项目”这一个终极目标，设定阶段性的里程碑目标可以激发热情，集中注意力。
+**** 第1阶段：我们再做什么
+    * 用例
+      1. 谁将使用这个系统
+      2. 执行这用这个系统做什么
+      3. 执行者如何用这个系统工作
+      4. 如果其他人也做这件事，或者同一个执行者有不同的目标，该怎么办
+      5. 当使用这个系统时，会发生什么问题
+**** 第2阶段：我们将如何建立对象
+     * 类职责协同（Class-Responsibility-Collaboration,CRC）卡片
+       * 类的名字
+       * 类的职责
+       * 类的协同：它与其他类有哪些交互
+***** 对象设计五个阶段
+      1. 对象发现
+      2. 对象装配
+      3. 系统构造
+      4. 系统扩充
+      5. 对象重用
+***** 对象开发准侧
+      1. 让特定问题生成一个类，然后再解决其它问题期间完善这个类
+      2. 发现所需的类（和它们的接口）是设计系统的主要内容
+      3. 不要强迫自己在一开始就知道每一件事情，应当不断地学习
+      4. 开始编程，让一部分运行起来
+      5. 尽量简单
+**** 第3阶段：创建核心
+**** 第4阶段：迭代用例
+**** 第5阶段：进化
+
+* 对象的创建和使用
+** 语言的翻译过程
+    * 解释器
+    * 编译器
+      * 编译过程
+        1. 预处理器
+        2. 代码生成器
+        3. 链接器
+        4. 静态类型检查
+** 分段编译工具
+    * 声明与定义
+      * 声明：向编译器介绍标识符
+        * 函数声明：
+          int func(int, int);
+          int func(int length, int width);
+          * 带空参数表的函数, int func1();
+            * C语言中表示可以接收任意参数
+            * C++中表示不带参数
+        * 变量声明：
+          * 关键字“extern” : extern int a;
+      * 定义：为标示符分配存储空间
+        * 函数定义：
+          和函数声明不同的是它又函数体，函数体是用大括号括起来的语句集
+** 编写第一个C++程序
+    * 字符数组拼接：如果两个加引号的字符数组邻接，并且它们之间没有标点，编译器就会把这些字符数组连接成单个字符数组。
+      #+BEGIN_SRC cpp
+        #include <iostream>
+        using namespace std;
+
+        int main()
+        {
+          cout << "This is far too long to put on a"
+            "single line but it can be broken up with"
+            "no ill effects";
+          return 0;
+        }
+      #+END_SRC
+** 关于输入输出流
+**** 文件读写
+     #+BEGIN_SRC cpp
+       //: C02:Scopy.cpp
+       // Copy one file to another, a line at a time
+       #include <string>
+       #include <fstream>
+       using namespace std;
+
+       int main()
+       {
+         ifstream in("Scopy.cpp"); // Open for reading
+         ofstream out("Scopy2.cpp"); // Open for writing
+         string s;
+         while (getline(in, s)) { // Discards newline char
+           out << s << "\n"; // ... must add it back
+         }
+       } ///:~
+     #+END_SRC
+**** Vector简介
+     #+BEGIN_SRC cpp
+       //: C02:Filevector.cpp
+       // Copy an entire file into a vector of string
+       #include <string>
+       #include <iostream>
+       #include <fstream>
+       #include <vector>
+       using namespace std;
+
+       int main( )
+       {
+         vector<string> v;
+         ifstream in("Filevector.cpp");
+         string line;
+         while (getline(in, line)) {
+           v.push_back(line); // Add the line to the end
+         }
+         for (unsigned int i = 0; i < v.size(); i++) {
+           cout << i << ": " << v[i] << endl;
+         }
+
+         return 0;
+       } ///:~
+     #+END_SRC
+* C++ 中的 C
+** 创建函数
+** 执行控制语句
+*** 运算符简介
+    * sizeof独立运算符
+    #+BEGIN_SRC cpp
+      #include <iostream>
+      #include <string>
+      using namespace std;
+
+      int main()
+      {
+        string str = "abc";
+        cout  << sizeof(str) << endl;
+        return 0;
+      }
+    #+END_SRC
+
+** 数据类型简介
+   * typedef
+     #+BEGIN_SRC c
+       int* x, y; // x is pointer; y is int
+
+       typedef int* IntPtr;
+
+       IntPtr x, y; // x and y are pointer
+     #+END_SRC
+** 作用域
+** 指定存储空间分配
+** 运算符及其使用
+** 创建复合类型
+**** 探究浮点格式
+     * 在float和double里的数字位被分为段：指数，尾数和符号位。
+       #+BEGIN_SRC cpp
+         //: C03:FloatingAsBinary.cpp
+         //{L} printBinary
+         //{T} 3.14159
+
+         #include <iostream>
+         #include <cstdlib>
+         using namespace std;
+
+         int main(int argc, char *argv[])
+         {
+           if(argc != 2)
+             {
+               cout << "Must provide a number!" << endl;
+               exit(1);
+             }
+           double d = atof(argv[1]);
+           unsigned char * cp = reinterpret_cast<unsigned char*>(&d);
+           for (int i = sizeof(double); i > 0; i -= 2) {
+             printBinary(cp[i-1]);
+             printBinary(cp[i]);
+           }
+
+           return 0;
+         }
+       #+END_SRC
+**** 指针算数
+** 调试技巧
+     * 字符串化预处理器特征,其中EX表达式会直接转换成字符串打印出来。
+       #+BEGIN_SRC cpp
+         #define  P(EX)  cout << #EX << ": " << EX << endl;
+       #+END_SRC
+** 函数地址
+**** 定义函数指针
+     #+BEGIN_SRC cpp
+       void (*funcPtr)();
+     #+END_SRC
+**** 复杂的声明和定义
+**** 使用函数指针
+**** 指向函数的指针数组
+** 管理分段编译
+* 数据抽象
+  :LOGBOOK:
+  CLOCK: [2019-05-28 Tue 16:43]--[2019-05-28 Tue 17:08] =>  0:25
+  :END:
+** 基本对象
+** 什么是对象
+   * 把函数捆绑在数据内部的变成语言是基于对象的，而不是面相对象的。
+** 抽象数据类型
+   * 封装：将数据与函数捆绑在一起创建出新的数据类型。
+   * 向对象发送消息：创建一束对象并且给它们发送消息。
+** 对象细节
+   * 对象规则：每个对象必须有唯一的地址，无数据成员的结构应该占有最小的非零长度。
+** 头文件形式
+*** TODO 头文件的重要性
+*** 头文件中的名字空间
+    * 不要在头文件中放置使用指令(using namespace ...)
+** 嵌套结构
+   * 全局作用域解析
+     * 当想要再成员函数中使用全局变量时，在作用域解析符前面不加任何符号。
+       #+BEGIN_SRC cpp
+         //: C04:Scoperes.cpp
+         // Global scope resolution
+
+         int a;
+         void f() {
+
+         }
+
+         struct S {
+           int a;
+           void f();
+         };
+
+         void S::f() {
+           ::f();
+           ::a++;
+           a--;
+         }
+         int main() {
+           S s;
+           f();
+         }
+
+         ///:~
+       #+END_SRC
+       在S::f()中没有使用作用域解析符的话，编译器默认的选择成员函数f()和成员变量a。
+* 隐藏实现
+** 设置限制
+   * 不完全类型声明(incomplete type specification)
+     #+BEGIN_SRC cpp
+       struct X;
+     #+END_SRC
+** TODO 友员
+** 对象布局
+** 类
+** 句柄类
+* 初始化与清除
+** 用构造函数确保初始化
+** 用析构函数确保清除
+** 清除定义块
+** 聚合初始化
+   * 就是复合数据类型的初始化
+* 函数重载与默认参数
+** TODO 联合在类中的使用
+   #+BEGIN_SRC cpp
+     //: C07:SuperVar.cpp
+     //: A super-variable
+     #include <iostream>
+     using namespace std;
+
+
+   #+END_SRC
+** 默认参数
+   * 占位符
+* 常量
+* 内联函数
+* 名字控制
+* 引用和拷贝构造函数

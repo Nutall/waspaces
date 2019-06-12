@@ -355,6 +355,12 @@
 
        Key: , z
 
+*** *resize windows size*
+    Key: SPC w .
+
+*** *treemacs*
+    Key: SPC w t
+
 * Linux
 ** Taking logcat and kernel logs simultaneously
    #+BEGIN_SRC sh
