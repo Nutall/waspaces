@@ -1,0 +1,56 @@
+* Qcom Camera
+** Camera Hal 加载流程（Android O以后）
+   1. 由provider进程来实现camera hal的加载过程
+      #+BEGIN_SRC cpp
+        // file: android/hardware/interfaces/camera/provider/2.4/default/CameraProvider.cpp
+        CameraProvider::CameraProvider() :
+          camera_module_callbacks_t({sCameraDeviceStatusChange,
+                                     sTorchModeStatusChange}) {
+          mInitFailed = initialize();
+        }
+
+        CameraProvider::~CameraProvider() {}
+
+        bool CameraProvider::initialize() {
+          camera_module_t *rawModule;
+          int err = hw_get_module(CAMERA_HARDWARE_MODULE_ID,
+                                  (const hw_module_t **)&rawModule);
+          if (err < 0) {
+            ALOGE("Could not load camera HAL module: %d (%s)", err, strerror(-err));
+            return true;
+          }
+
+          mModule = new CameraModule(rawModule);
+          err = mModule->init();
+          if (err != OK) {
+            ALOGE("Could not initialize camera HAL module: %d (%s)", err, strerror(-err));
+            mModule.clear();
+            return true;
+          }
+          ALOGI("Loaded \"%s\" camera module", mModule->getModuleName());
+
+        // file: android/hardware/libhardware/hardware.c
+
+          int hw_get_module(const char *id, const struct hw_module_t **module)
+          {
+            return hw_get_module_by_class(id, NULL, module);
+          }
+
+          /* Get the address of the struct hal_module_info. */
+          const char *sym = HAL_MODULE_INFO_SYM_AS_STR;
+          hmi = (struct hw_module_t *)dlsym(handle, sym);
+          if (hmi == NULL) {
+            ALOGE("load: couldn't find symbol %s", sym);
+            status = -EINVAL;
+            goto done;
+          }
+
+          /* Check that the id matches */
+          if (strcmp(id, hmi->id) != 0) {
+            ALOGE("load: id=%s != hmi->id=%s", id, hmi->id);
+            status = -EINVAL;
+            goto done;
+          }
+
+          hmi->dso = handle;
+      #+END_SRC

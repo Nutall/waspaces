@@ -361,6 +361,13 @@
 *** *treemacs*
     Key: SPC w t
 
+*** *org mode text format*
+    * *bold*
+    * /italic/
+    * _underlined_
+    * =code=
+    * ~verbatim~
+    * +strike-through+
 * Linux
 ** Taking logcat and kernel logs simultaneously
    #+BEGIN_SRC sh
