@@ -1,0 +1,163 @@
+* 编译要求
+** 如果要使用=gdb=调试，必须要告诉编译器编译带调试信息的可执行文件,=gcc=携带参数=-g=。
+  #+BEGIN_SRC sh
+    gcc -g hello.c -o hello
+    g++ -g hello.c -o hello
+  #+END_SRC
+* 开始调试
+** 在终端输入=gdb=命令进入gdb调试终端环境,输入=quite=退出gdb环境，输入=enter=重复执行上一次gdb命令。
+  #+BEGIN_SRC sh
+    GNU gdb (Ubuntu 7.11.1-0ubuntu1~16.5) 7.11.1
+    Copyright (C) 2016 Free Software Foundation, Inc.
+    License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+    This is free software: you are free to change and redistribute it.
+    There is NO WARRANTY, to the extent permitted by law.  Type "show copying"
+    and "show warranty" for details.
+    This GDB was configured as "x86_64-linux-gnu".
+    Type "show configuration" for configuration details.
+    For bug reporting instructions, please see:
+    <http://www.gnu.org/software/gdb/bugs/>.
+    Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+    For help, type "help".
+    Type "apropos word" to search for commands related to "word".
+    (gdb)
+  #+END_SRC
+** 在gdb调试环境下输入help可以查询相关的调试命令
+  #+BEGIN_SRC sh
+    (gdb) help
+    List of classes of commands:
+
+    aliases -- Aliases of other commands
+    breakpoints -- Making program stop at certain points
+    data -- Examining data
+    files -- Specifying and examining files
+    internals -- Maintenance commands
+    obscure -- Obscure features
+    running -- Running the program
+    stack -- Examining the stack
+    status -- Status inquiries
+    support -- Support facilities
+    tracepoints -- Tracing of program execution without stopping the program
+    user-defined -- User-defined commands
+
+    Type "help" followed by a class name for a list of commands in that class.
+    Type "help all" for the list of all commands.
+    Type "help" followed by command name for full documentation.
+    Type "apropos word" to search for commands related to "word".
+    Command name abbreviations are allowed if unambiguous.
+    (gdb)
+  #+END_SRC
+** 加载可执行文件有两种方式：=gdb -q hello= -q参数的意思是不显示gdb版本等内容信息，或者先进入gdb环境后执行=file hello=命令
+    #+BEGIN_SRC sh
+      junyi@junyi-virtual-machine:Temp$ gdb -q hello
+      Reading symbols from hello...done.
+      (gdb)
+    #+END_SRC
+    #+BEGIN_SRC sh
+      (gdb) file hello
+      Reading symbols from hello...done.
+      (gdb)
+    #+END_SRC
+** 如果调试的可执行程序需要带参数
+    #+BEGIN_SRC sh
+      (gdb) run arg1 arg2
+      Starting program: /home/junyi/workspace1/Temp/hello arg1 arg2
+      hello world!
+      [Inferior 1 (process 53163) exited normally]
+      (gdb)
+    #+END_SRC
+** 很多时候都需要将程序停下来，所以在直接输入=run=命令之前，我们通常可以先设置一些断点，使用=break=或=b=命令，这样程序执行到断点的位置就会停下。
+    * break main: 在main函数开始的地方设置断点
+      #+BEGIN_SRC sh
+        junyi@junyi-virtual-machine:Temp$ gdb -q hello
+        Reading symbols from hello...done.
+        (gdb) b main
+        Breakpoint 1 at 0x400535: file hello.c, line 5.
+        (gdb) r
+        Starting program: /home/junyi/workspace1/Temp/hello
+
+        Breakpoint 1, main (argc=1, argv=0x7fffffffe018) at hello.c:5
+        5         printf("hello world!\n");
+        (gdb)
+      #+END_SRC
+    * break 5:    在当前文件第五行的位置设置断点
+    * break hello.c:5 在hello.c文件第五行的位置加入断点
+** 使用=info=命令可以列出已设置的断点信息
+    #+BEGIN_SRC sh
+      (gdb) info b
+      Num     Type           Disp Enb Address            What
+      1       breakpoint     keep y   0x0000000000400535 in main at hello.c:5
+      breakpoint already hit 1 time
+      (gdb)
+    #+END_SRC
+** 使用=clear=或=delete=命令可以清除断点,注意使用=delete=命令的话，必须跟断点编号参数。
+    #+BEGIN_SRC sh
+      (gdb) b main
+      Breakpoint 7 at 0x400535: file hello.c, line 5.
+      (gdb) i b
+      Num     Type           Disp Enb Address            What
+      7       breakpoint     keep y   0x0000000000400535 in main at hello.c:5
+      (gdb) clear
+      Deleted breakpoint 7
+      (gdb) i b
+      No breakpoints or watchpoints.
+      (gdb)
+    #+END_SRC
+** 使用=enable=和=disable=命令可以在不删除断点的情况下使能断点
+    #+BEGIN_SRC sh
+      (gdb) i b
+      Num     Type           Disp Enb Address            What
+      8       breakpoint     keep y   0x0000000000400535 in main at hello.c:5
+      (gdb) disable 8
+      (gdb) i b
+      Num     Type           Disp Enb Address            What
+      8       breakpoint     keep n   0x0000000000400535 in main at hello.c:5
+      (gdb) enable 8
+      (gdb) i b
+      Num     Type           Disp Enb Address            What
+      8       breakpoint     keep y   0x0000000000400535 in main at hello.c:5
+      (gdb)
+    #+END_SRC
+** 单步执行，当程序执行到断点的位置希望继续往下执行的时候，可以使用=next=或=n=命令，该命令会执行下一段语句，如果遇到函数调用的话，会直接执行完整个函数，如果我们想要进入某个函数内部的话，必须使用=step=或=s=命令。执行=n=命令的时候，在(gdb)前面显示的一行代码，就是要执行的下一条执行，如下6。
+    #+BEGIN_SRC sh
+      (gdb) r
+      The program being debugged has been started already.
+      Start it from the beginning? (y or n) y
+      Starting program: /home/junyi/workspace1/Temp/hello
+
+      Breakpoint 9, main (argc=1, argv=0x7fffffffe018) at hello.c:5
+      5         printf("hello world!\n");
+      (gdb) n
+      hello world!
+      6         return 0;
+      (gdb)
+      7       }
+      (gdb)
+    #+END_SRC
+
+** 使用=display=命令可以查看变量信息，当执行=display=后，每次执行=n=命令时，该变量信息都会打印出来，取消使用=undisplay=命令。
+    #+BEGIN_SRC sh
+      junyi@junyi-virtual-machine:Temp$ gdb -q hello
+      Reading symbols from hello...done.
+      (gdb) b main
+      Breakpoint 1 at 0x400535: file hello.c, line 6.
+      (gdb) r
+      Starting program: /home/junyi/workspace1/Temp/hello
+
+      Breakpoint 1, main (argc=1, argv=0x7fffffffe018) at hello.c:6
+      6         printf("hello world!\n");
+      (gdb) display i
+      1: i = 0
+      (gdb) n
+      hello world!
+      7         for (i = 0; i < 10; ++i) {
+          1: i = 0
+          (gdb) n
+          11        return 0;
+          1: i = 10
+          (gdb)
+          12      }
+      1: i = 10
+      (gdb)
+    #+END_SRC
