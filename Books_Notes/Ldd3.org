@@ -1,0 +1,67 @@
+* Introduce to device driver
+** The role of the device driver
+*** a device driver is providing ~mechanism~, not ~policy~.
+    * mechanism
+      what capabilitys are to be provided.
+    * policy
+      how these capability can be used
+*** Splitting the kernel
+    * Process managment
+    * Memory managment
+    * Filesystems
+    * Devices control
+    * Networking
+*** Loadable Modules
+    * The ability to extend at running the set of features offered by the kernel.
+    * Each piece of code that can be added to the kernel at runtime is callled a module.
+*** Class of devices and Modules
+    * Char module
+    * a block module
+    * a network module
+    * Character devices
+      A character device is one that can be accessed as a stream of byte(like a file).
+    * Block devices
+    * Network devices
+*** Security issues
+    * Any input received from user processes should be treated with great suspicion.
+    * Be careful with unintialized memory.
+    * Any memory obtained from the kernel should be zeroed or otherwise initialized before being made available to a user process or device.
+
+* Building and Running Modules
+  #+begin_src c
+    #include <linux/init.h>
+    #include <linux/module.h>
+    MODULE_LICENSE("Dual BSD/GPL");
+
+    static int hello_init(void)
+    {
+      printk(KERN_ALERT "Hello world\n");
+      return 0;
+    }
+
+    static void hello_exit(void)
+    {
+      printk(KERN_ALERT "Goodbye, cruel world\n");
+    }
+
+    module_init(hello_init);
+    module_exit(hello_exit);
+  #+end_src
+** Kernel Module Versus Application
+*** Each and every kernel module is even-driven programming, but not all application.
+*** The exit function of a module undo everything the init function built up.
+** Uer Space and Kernel Space
+** Concurrency in the kernel
+** The Current Process
+** A Few Other Details
+   * Application are laid out in virtual memory with a very large stack area. The kernel, insttead, has a very small stack.
+* Char Drivers
+** Major and Minor Numbers
+   * Major number
+     Present one special driver program
+   * Minor number
+     The device which uses the special driver
+** Three important structure
+   * struct file_operation
+   * struct file
+   * struct inode
